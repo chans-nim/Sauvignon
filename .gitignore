@@ -1,0 +1,35 @@
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+
+# Local build artifacts and generated reports
+/chart_*.png
+/report_*.txt
+/reports/
+/backups/
+
+# Local data lake and staging outputs
+data/
+staging/
+meta/
+
+# IDE / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

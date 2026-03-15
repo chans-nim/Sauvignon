@@ -1,0 +1,589 @@
+"""
+티커(종목코드)를 입력하면 실제 수집된 데이터를 바탕으로 종목 리포트를 생성한다.
+
+리포트 내용:
+- 유니버스/수집 상태/실버 저장 현황
+- 최신 raw JSON 의 output1 실제 값 + 의미
+- 최신 raw JSON 의 output2 필드 설명 + 최근 행 샘플 + 요약 통계
+- 차트가 유용한 값은 PNG 로 생성
+
+사용법 (프로젝트 루트에서):
+  python -m scripts.ticker_report --symbol 005930
+  python -m scripts.ticker_report --symbol 000540 --out-dir reports
+"""
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+
+if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.common.settings import settings
+from src.storage import meta_store
+
+SILVER_DIR = settings.project_root / "data" / "lake" / "silver" / "ohlcv_daily"
+RAW_OHLCV_DIR = settings.project_root / "data" / "raw" / "ohlcv"
+TARGET_START = "2016-01-01"
+TARGET_END = "2025-12-31"
+MIN_ROWS_PER_YEAR = 200
+
+
+OUTPUT1_FIELDS = {
+    "hts_kor_isnm": ("종목명", "현재 조회 종목의 한글명"),
+    "stck_shrn_iscd": ("종목코드", "단축 종목코드"),
+    "stck_prpr": ("현재가", "조회 시점 현재가"),
+    "prdy_vrss": ("전일 대비", "전일 종가 대비 등락 금액"),
+    "prdy_vrss_sign": ("대비 부호", "1=상한, 2=상승, 3=보합, 4=하한, 5=하락"),
+    "prdy_ctrt": ("등락률", "전일 종가 대비 등락률(%)"),
+    "stck_prdy_clpr": ("전일 종가", "이전 거래일 종가"),
+    "stck_oprc": ("시가", "당일 시가"),
+    "stck_hgpr": ("고가", "당일 고가"),
+    "stck_lwpr": ("저가", "당일 저가"),
+    "acml_vol": ("누적 거래량", "당일 누적 거래량"),
+    "acml_tr_pbmn": ("누적 거래대금", "당일 누적 거래대금"),
+    "prdy_vol": ("전일 거래량", "이전 거래일 거래량"),
+    "prdy_vrss_vol": ("전일 대비 거래량 증감", "전일 거래량 대비 증감"),
+    "vol_tnrt": ("거래량 회전율", "상장주식수 대비 거래량 비율(%)"),
+    "askp": ("매도호가", "조회 시점 최우선 매도호가"),
+    "bidp": ("매수호가", "조회 시점 최우선 매수호가"),
+    "stck_mxpr": ("상한가", "당일 가격제한 상한"),
+    "stck_llam": ("하한가", "당일 가격제한 하한"),
+    "stck_fcam": ("액면가", "주식 액면가"),
+    "lstn_stcn": ("상장주식수", "상장 주식 수"),
+    "cpfn": ("자본금", "자본금"),
+    "hts_avls": ("시가총액", "HTS 기준 시가총액"),
+    "per": ("PER", "주가수익비율"),
+    "eps": ("EPS", "주당순이익"),
+    "pbr": ("PBR", "주가순자산비율"),
+    "itewhol_loan_rmnd_ratem name": ("대주잔고비율", "대주잔고 비율"),
+}
+
+OUTPUT2_FIELDS = {
+    "stck_bsop_date": ("영업일자", "해당 일봉의 거래일"),
+    "stck_clpr": ("종가", "해당 거래일 종가"),
+    "stck_oprc": ("시가", "해당 거래일 시가"),
+    "stck_hgpr": ("고가", "해당 거래일 고가"),
+    "stck_lwpr": ("저가", "해당 거래일 저가"),
+    "acml_vol": ("거래량", "해당 거래일 거래량"),
+    "acml_tr_pbmn": ("거래대금", "해당 거래일 거래대금"),
+    "prdy_vrss": ("전일 대비", "전일 종가 대비 변동 금액"),
+    "prdy_vrss_sign": ("대비 부호", "1=상한, 2=상승, 3=보합, 4=하한, 5=하락"),
+    "flng_cls_code": ("락 구분 코드", "권리락/배당락 등 구분 코드"),
+    "prtt_rate": ("분할 비율", "분할/병합 비율 관련 값"),
+    "mod_yn": ("수정 여부", "수정주가 적용 여부"),
+    "revl_issu_reas": ("재평가 사유", "재평가/정정 관련 사유"),
+}
+
+
+def fmt_num(value) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        if isinstance(value, str) and "." in value:
+            return f"{float(value):,.2f}"
+        return f"{int(value):,}"
+    except Exception:
+        return str(value)
+
+
+def fmt_pct(value) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        return f"{float(value):.2f}%"
+    except Exception:
+        return str(value)
+
+
+def format_output_value(key: str, value) -> str:
+    if key in {"prdy_ctrt", "vol_tnrt", "per", "pbr", "prtt_rate", "itewhol_loan_rmnd_ratem name"}:
+        return fmt_pct(value) if key != "per" and key != "pbr" else str(value)
+    if key in {"hts_kor_isnm", "stck_shrn_iscd", "prdy_vrss_sign", "flng_cls_code", "mod_yn", "revl_issu_reas"}:
+        return str(value)
+    if key == "stck_bsop_date":
+        return str(value)
+    return fmt_num(value)
+
+
+def get_universe_row(symbol: str):
+    meta_store.ensure_tables()
+    con = meta_store.connect()
+    row = con.execute(
+        """
+        SELECT symbol, std_code, name, market, asset_type, listing_date,
+               is_etf, is_spac, is_trading_halt, is_admin_issue,
+               is_warning, is_active, updated_at
+        FROM universe
+        WHERE symbol = ?
+        """,
+        [symbol],
+    ).fetchone()
+    con.close()
+    if not row:
+        return None
+    return {
+        "symbol": row[0],
+        "std_code": row[1],
+        "name": row[2],
+        "market": row[3],
+        "asset_type": row[4],
+        "listing_date": row[5],
+        "is_etf": row[6],
+        "is_spac": row[7],
+        "is_trading_halt": row[8],
+        "is_admin_issue": row[9],
+        "is_warning": row[10],
+        "is_active": row[11],
+        "updated_at": row[12],
+    }
+
+
+def get_collect_state(symbol: str):
+    con = meta_store.connect()
+    row = con.execute(
+        """
+        SELECT last_success_date, last_attempt_at, retry_count, last_error, updated_at
+        FROM collect_state
+        WHERE symbol = ? AND timeframe = '1d'
+        """,
+        [symbol],
+    ).fetchone()
+    con.close()
+    if not row:
+        return None
+    return {
+        "last_success_date": row[0],
+        "last_attempt_at": row[1],
+        "retry_count": row[2],
+        "last_error": row[3],
+        "updated_at": row[4],
+    }
+
+
+def load_silver(symbol: str, market: str) -> pd.DataFrame:
+    import duckdb
+
+    base = SILVER_DIR / f"market={market}" / f"symbol={symbol}"
+    paths = [p.as_posix() for p in base.rglob("data.parquet")]
+    if not paths:
+        return pd.DataFrame()
+    con = duckdb.connect()
+    df = con.execute("SELECT * FROM read_parquet(?) ORDER BY date", [paths]).fetchdf()
+    con.close()
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def latest_raw_file(symbol: str) -> Path | None:
+    candidates = []
+    if not RAW_OHLCV_DIR.exists():
+        return None
+    for day_dir in RAW_OHLCV_DIR.iterdir():
+        if not day_dir.is_dir():
+            continue
+        for f in day_dir.glob(f"{symbol}*.json"):
+            candidates.append(f)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda p: (p.parent.name, p.name))[-1]
+
+
+def raw_files_for_symbol(symbol: str) -> list[Path]:
+    candidates = []
+    if not RAW_OHLCV_DIR.exists():
+        return candidates
+    for day_dir in RAW_OHLCV_DIR.iterdir():
+        if not day_dir.is_dir():
+            continue
+        for f in day_dir.glob(f"{symbol}*.json"):
+            candidates.append(f)
+    return sorted(candidates, key=lambda p: (p.parent.name, p.name))
+
+
+def load_latest_raw(symbol: str):
+    p = latest_raw_file(symbol)
+    if p is None:
+        return None, None
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return p, data
+
+
+def load_output2_recent_six_months(symbol: str) -> pd.DataFrame:
+    rows: list[dict] = []
+    for p in raw_files_for_symbol(symbol):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        payload_rows = data.get("output2") or []
+        if isinstance(payload_rows, list):
+            rows.extend(payload_rows)
+    df = normalize_output2_rows(rows)
+    if df.empty:
+        return df
+    df = df.drop_duplicates(subset=["stck_bsop_date"], keep="last").sort_values("date").reset_index(drop=True)
+    latest_date = df["date"].max()
+    cutoff = (latest_date - pd.DateOffset(months=6)).normalize()
+    return df[df["date"] >= cutoff].copy().reset_index(drop=True)
+
+
+def normalize_output2_rows(rows: list[dict]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    if "stck_bsop_date" in df.columns:
+        df["date"] = pd.to_datetime(df["stck_bsop_date"], format="%Y%m%d", errors="coerce")
+    for col in ["stck_clpr", "stck_oprc", "stck_hgpr", "stck_lwpr", "acml_vol", "acml_tr_pbmn", "prdy_vrss"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def coverage_summary(df: pd.DataFrame) -> dict:
+    if df.empty:
+        return {"total": 0, "years": {}, "missing": [], "short": []}
+    sub = df[(df["date"] >= TARGET_START) & (df["date"] <= TARGET_END)].copy()
+    years = sub["date"].dt.year.value_counts().sort_index().to_dict() if not sub.empty else {}
+    missing = []
+    short = []
+    for y in range(int(TARGET_START[:4]), int(TARGET_END[:4]) + 1):
+        cnt = years.get(y, 0)
+        if cnt == 0:
+            missing.append(y)
+        elif cnt < MIN_ROWS_PER_YEAR:
+            short.append((y, cnt))
+    return {"total": len(sub), "years": years, "missing": missing, "short": short}
+
+
+def build_output1_rows(output1: dict) -> list[tuple[str, str, str, str]]:
+    rows = []
+    for key, value in output1.items():
+        label, meaning = OUTPUT1_FIELDS.get(key, (key, "필드 설명 미등록"))
+        rows.append((key, label, format_output_value(key, value), meaning))
+    return rows
+
+
+def build_output2_field_rows(output2_df: pd.DataFrame) -> list[tuple[str, str, str, str]]:
+    rows = []
+    sample = output2_df.iloc[-1].to_dict() if not output2_df.empty else {}
+    for key in sample.keys():
+        if key == "date":
+            continue
+        label, meaning = OUTPUT2_FIELDS.get(key, (key, "필드 설명 미등록"))
+        rows.append((key, label, format_output_value(key, sample.get(key)), meaning))
+    return rows
+
+
+def render_html_table(headers: list[str], rows: list[list[str]]) -> str:
+    parts = ['<table class="data-table">', "<thead><tr>"]
+    parts.extend([f"<th>{html.escape(str(h))}</th>" for h in headers])
+    parts.append("</tr></thead><tbody>")
+    for row in rows:
+        parts.append("<tr>")
+        parts.extend([f"<td>{html.escape(str(x).replace(chr(10), ' '))}</td>" for x in row])
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return "".join(parts)
+
+
+def plot_silver_overview(df: pd.DataFrame, symbol: str, out_path: Path) -> None:
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True, height_ratios=[3, 1])
+    x = df["date"]
+    ax1.plot(x, df["close"], color="steelblue", linewidth=1)
+    ax1.set_title(f"{symbol} Silver Long-term Overview")
+    ax1.set_ylabel("Close")
+    ax1.grid(True, alpha=0.3)
+    ax2.bar(x, df["volume"] / 1e6, color="gray", alpha=0.7, width=2)
+    ax2.set_ylabel("Volume (M)")
+    ax2.grid(True, alpha=0.3)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    ax2.xaxis.set_major_locator(mdates.YearLocator())
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_raw_output2(df: pd.DataFrame, symbol: str, out_path: Path) -> None:
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    fig, axes = plt.subplots(3, 1, figsize=(14, 9), sharex=True, height_ratios=[3, 1, 1])
+    x = df["date"]
+    axes[0].plot(x, df["stck_clpr"], color="tab:blue", linewidth=1.2, label="Close")
+    axes[0].plot(x, df["stck_oprc"], color="tab:orange", linewidth=0.8, alpha=0.7, label="Open")
+    axes[0].fill_between(x, df["stck_lwpr"], df["stck_hgpr"], color="tab:blue", alpha=0.12, label="Low-High")
+    axes[0].set_title(f"{symbol} Latest Raw output2 Window")
+    axes[0].set_ylabel("Price")
+    axes[0].legend(loc="upper left")
+    axes[0].grid(True, alpha=0.3)
+    axes[1].bar(x, df["acml_vol"] / 1e6, color="gray", alpha=0.7, width=2)
+    axes[1].set_ylabel("Vol (M)")
+    axes[1].grid(True, alpha=0.3)
+    axes[2].bar(x, df["acml_tr_pbmn"] / 1e9, color="tab:green", alpha=0.7, width=2)
+    axes[2].set_ylabel("Value (B KRW)")
+    axes[2].grid(True, alpha=0.3)
+    axes[2].xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_yearly_rows(coverage: dict, symbol: str, out_path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    years = list(range(int(TARGET_START[:4]), int(TARGET_END[:4]) + 1))
+    counts = [coverage["years"].get(y, 0) for y in years]
+    colors = ["tab:blue" if c >= MIN_ROWS_PER_YEAR else "tab:red" for c in counts]
+    plt.figure(figsize=(10, 4))
+    plt.bar([str(y) for y in years], counts, color=colors, alpha=0.8)
+    plt.axhline(MIN_ROWS_PER_YEAR, color="black", linestyle="--", linewidth=1, label=f"threshold={MIN_ROWS_PER_YEAR}")
+    plt.title(f"{symbol} Rows per Year ({TARGET_START[:4]}-{TARGET_END[:4]})")
+    plt.ylabel("Rows")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def build_report(
+    symbol: str,
+    universe: dict,
+    state: dict | None,
+    silver_df: pd.DataFrame,
+    raw_path: Path | None,
+    raw_data: dict | None,
+    out_dir: Path,
+) -> str:
+    report_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    coverage = coverage_summary(silver_df)
+    output1 = {} if not raw_data else raw_data.get("output1") or {}
+    output2_rows = [] if not raw_data else raw_data.get("output2") or []
+    output2_df = normalize_output2_rows(output2_rows)
+    output2_recent_df = load_output2_recent_six_months(symbol)
+
+    silver_chart = out_dir / f"{symbol}_silver_overview.png"
+    raw_chart = out_dir / f"{symbol}_raw_output2.png"
+    year_chart = out_dir / f"{symbol}_yearly_rows.png"
+    if not silver_df.empty:
+        plot_silver_overview(silver_df, symbol, silver_chart)
+        plot_yearly_rows(coverage, symbol, year_chart)
+    if not output2_recent_df.empty:
+        plot_raw_output2(output2_recent_df, symbol, raw_chart)
+
+    output1_table = render_html_table(
+        ["필드코드", "표시명", "실제값", "의미"],
+        [[a, b, c, d] for a, b, c, d in build_output1_rows(output1)],
+    ) if output1 else '<p class="empty">latest raw output1 없음</p>'
+
+    output2_field_table = render_html_table(
+        ["필드코드", "표시명", "최근 샘플값", "의미"],
+        [[a, b, c, d] for a, b, c, d in build_output2_field_rows(output2_recent_df)],
+    ) if not output2_recent_df.empty else '<p class="empty">최근 6개월 output2 없음</p>'
+
+    recent_rows_html = '<p class="empty">recent rows 없음</p>'
+    if not output2_recent_df.empty:
+        tail = output2_recent_df.tail(10).copy()
+        tail["date"] = tail["date"].dt.strftime("%Y-%m-%d")
+        recent_rows_html = render_html_table(
+            ["date", "open", "high", "low", "close", "volume", "value"],
+            [
+                [
+                    r["date"],
+                    fmt_num(r.get("stck_oprc")),
+                    fmt_num(r.get("stck_hgpr")),
+                    fmt_num(r.get("stck_lwpr")),
+                    fmt_num(r.get("stck_clpr")),
+                    fmt_num(r.get("acml_vol")),
+                    fmt_num(r.get("acml_tr_pbmn")),
+                ]
+                for _, r in tail.iterrows()
+            ],
+        )
+    summary_table = render_html_table(
+        ["항목", "값", "의미"],
+        [
+            ["symbol", universe.get("symbol", "-"), "조회 대상 종목코드"],
+            ["name", universe.get("name", "-"), "유니버스에 저장된 종목명"],
+            ["market", universe.get("market", "-"), "시장 구분"],
+            ["is_active", universe.get("is_active", "-"), "현재 유니버스 활성 여부"],
+            ["is_etf", universe.get("is_etf", "-"), "ETF 여부"],
+            ["is_spac", universe.get("is_spac", "-"), "스팩 여부"],
+            ["is_warning", universe.get("is_warning", "-"), "투자경고/주의 관련 플래그"],
+            ["last_success_date", "-" if not state else state.get("last_success_date", "-"), "마지막 성공 거래일"],
+            ["last_attempt_at", "-" if not state else state.get("last_attempt_at", "-"), "마지막 수집 시도 시각"],
+            ["retry_count", "-" if not state else state.get("retry_count", "-"), "실패 후 재시도 횟수"],
+            ["last_error", "-" if not state else (state.get("last_error") or "-"), "최근 실패 오류 메시지"],
+        ],
+    )
+
+    silver_section = '<p class="empty">실버 데이터가 없습니다.</p>'
+    if not silver_df.empty:
+        min_date = silver_df["date"].min().date()
+        max_date = silver_df["date"].max().date()
+        silver_stats = render_html_table(
+            ["항목", "값", "의미"],
+            [
+                ["rows_total", fmt_num(len(silver_df)), "실버에 저장된 전체 일봉 행 수"],
+                ["date_range", f"{min_date} ~ {max_date}", "실제 저장 구간"],
+                ["rows_in_target", fmt_num(coverage["total"]), f"{TARGET_START} ~ {TARGET_END} 구간 행 수"],
+                ["missing_years", ", ".join(map(str, coverage["missing"])) or "-", "해당 연도 데이터가 전혀 없는 경우"],
+                ["short_years", ", ".join([f"{y}:{c}" for y, c in coverage["short"]]) or "-", f"{MIN_ROWS_PER_YEAR}행 미만 연도"],
+            ],
+        )
+        year_rows = [
+            [str(y), fmt_num(coverage["years"].get(y, 0)), "ok" if coverage["years"].get(y, 0) >= MIN_ROWS_PER_YEAR else "SHORT" if coverage["years"].get(y, 0) > 0 else "MISSING"]
+            for y in range(int(TARGET_START[:4]), int(TARGET_END[:4]) + 1)
+        ]
+        yearly_table = render_html_table(["연도", "행 수", "판정"], year_rows)
+        silver_section = (
+            f"{silver_stats}"
+            f'<div class="chart-grid"><figure><img src="{html.escape(silver_chart.name)}" alt="silver overview"></figure>'
+            f'<figure><img src="{html.escape(year_chart.name)}" alt="yearly rows"></figure></div>'
+            f"{yearly_table}"
+        )
+
+    raw_section = '<p class="empty">최신 raw JSON 파일이 없습니다.</p>'
+    if raw_path is not None and raw_data is not None:
+        raw_stats = render_html_table(
+            ["항목", "값", "의미"],
+            [
+                ["file_path", str(raw_path), "가장 최신 raw JSON 파일 경로"],
+                ["rt_cd", raw_data.get("rt_cd", "-"), "API 결과 코드 (0/0000 정상)"],
+                ["msg_cd", raw_data.get("msg_cd", "-"), "API 메시지 코드"],
+                ["msg1", raw_data.get("msg1", "-"), "API 응답 메시지"],
+                ["output2_rows", fmt_num(len(output2_rows)), "해당 raw 파일에 포함된 일봉 행 수"],
+            ],
+        )
+        raw_section = raw_stats
+        raw_section += '<h3>3-1. output1 실제값 정리</h3>'
+        raw_section += '<p>output1은 조회 시점의 종목 스냅샷 값입니다. 가격, 호가, 거래량, 밸류에이션 지표를 담습니다.</p>'
+        raw_section += output1_table
+        raw_section += '<h3>3-2. output2 필드 설명</h3>'
+        raw_section += '<p>output2는 일자별 시계열 데이터입니다. 아래 표/차트/통계는 최신 raw 파일 1개가 아니라, 해당 종목 raw 파일 전체를 합쳐 중복 제거한 뒤 최신 날짜 기준 최근 6개월로 잘라서 표시합니다.</p>'
+        raw_section += output2_field_table
+        if not output2_recent_df.empty:
+            raw_stats2 = render_html_table(
+                ["항목", "값", "의미"],
+                [
+                    ["window_range", f"{output2_recent_df['date'].min().date()} ~ {output2_recent_df['date'].max().date()}", "전체 raw output2를 합친 뒤 최신 날짜 기준 최근 6개월 구간"],
+                    ["rows", fmt_num(len(output2_recent_df)), "최근 6개월 구간 행 수"],
+                    ["close_min", fmt_num(output2_recent_df["stck_clpr"].min()), "종가 최저값"],
+                    ["close_max", fmt_num(output2_recent_df["stck_clpr"].max()), "종가 최고값"],
+                    ["close_mean", fmt_num(round(output2_recent_df["stck_clpr"].mean())), "종가 평균"],
+                    ["volume_mean", fmt_num(round(output2_recent_df["acml_vol"].mean())), "거래량 평균"],
+                    ["value_mean", fmt_num(round(output2_recent_df["acml_tr_pbmn"].mean())), "거래대금 평균"],
+                ],
+            )
+            raw_section += '<h3>3-3. output2 최근 6개월 샘플</h3>'
+            raw_section += recent_rows_html
+            raw_section += '<h3>3-4. output2 요약 통계 (최근 6개월)</h3>'
+            raw_section += raw_stats2
+            raw_section += f'<div class="chart-grid"><figure><img src="{html.escape(raw_chart.name)}" alt="raw output2 chart"></figure></div>'
+
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(symbol)} 종목 데이터 리포트</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 0; background: #f6f8fb; color: #1f2937; }}
+    .wrap {{ max-width: 1200px; margin: 0 auto; padding: 24px; }}
+    .hero {{ background: #111827; color: white; padding: 24px; border-radius: 12px; }}
+    .hero h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    .meta {{ display: flex; gap: 16px; flex-wrap: wrap; color: #d1d5db; font-size: 14px; }}
+    .section {{ background: white; margin-top: 20px; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }}
+    h2 {{ margin: 0 0 16px; font-size: 22px; }}
+    h3 {{ margin-top: 22px; }}
+    .data-table {{ border-collapse: collapse; width: 100%; margin: 12px 0 18px; font-size: 14px; }}
+    .data-table th, .data-table td {{ border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }}
+    .data-table th {{ background: #f3f4f6; }}
+    .chart-grid {{ display: grid; grid-template-columns: 1fr; gap: 16px; margin: 16px 0; }}
+    .chart-grid figure {{ margin: 0; background: #fff; }}
+    .chart-grid img {{ max-width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; }}
+    .empty {{ color: #6b7280; font-style: italic; }}
+    .note li {{ margin: 6px 0; }}
+    @media (min-width: 960px) {{
+      .chart-grid {{ grid-template-columns: 1fr 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>{html.escape(symbol)} 종목 데이터 리포트</h1>
+      <div class="meta">
+        <div>작성 시각: {html.escape(report_ts)}</div>
+        <div>종목명: {html.escape(str(universe.get('name', '-')))}</div>
+        <div>시장: {html.escape(str(universe.get('market', '-')))}</div>
+        <div>자산유형: {html.escape(str(universe.get('asset_type', '-')))}</div>
+        <div>상장일: {html.escape(str(universe.get('listing_date', '-')))}</div>
+      </div>
+    </div>
+    <section class="section">
+      <h2>1. 종목/수집 상태</h2>
+      {summary_table}
+    </section>
+    <section class="section">
+      <h2>2. Silver 저장 현황</h2>
+      {silver_section}
+    </section>
+    <section class="section">
+      <h2>3. 최신 Raw 파일</h2>
+      {raw_section}
+    </section>
+    <section class="section">
+      <h2>4. 표시 방식 안내</h2>
+      <ul class="note">
+        <li>가격/거래량/거래대금처럼 시간 흐름을 보는 값은 차트로 표시했습니다.</li>
+        <li>메타데이터, 상태값, 스냅샷 값은 표 형태로 정리했습니다.</li>
+        <li>output1은 조회 시점 단일 스냅샷이라 표가 적합하고, output2는 시계열이므로 차트와 최근 행 샘플을 함께 보여줍니다.</li>
+      </ul>
+    </section>
+  </div>
+</body>
+</html>"""
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="실제 내부값 기반 종목 리포트 생성")
+    parser.add_argument("--symbol", required=True, help="종목코드 (예: 005930)")
+    parser.add_argument("--out-dir", default="reports", help="리포트 출력 디렉터리")
+    args = parser.parse_args()
+
+    symbol = args.symbol.strip()
+    universe = get_universe_row(symbol)
+    if universe is None:
+        print(f"ERROR: symbol '{symbol}' not found in universe.", file=sys.stderr)
+        sys.exit(2)
+
+    out_dir = Path(args.out_dir) / symbol
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    state = get_collect_state(symbol)
+    silver_df = load_silver(symbol, str(universe["market"]))
+    raw_path, raw_data = load_latest_raw(symbol)
+    report = build_report(symbol, universe, state, silver_df, raw_path, raw_data, out_dir)
+
+    report_path = out_dir / f"{symbol}_report.html"
+    report_path.write_text(report, encoding="utf-8")
+
+    print(f"Report written: {report_path}")
+    print(f"Output directory: {out_dir}")
+
+
+if __name__ == "__main__":
+    main()

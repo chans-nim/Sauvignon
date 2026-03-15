@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "latest_current": null,
+  "latest_full": null,
+  "latest_delta": {
+    "tag": null,
+    "release_type": "delta",
+    "file_name": null,
+    "sha256": null,
+    "row_count": null,
+    "created_at": null,
+    "min_date": null,
+    "max_date": null,
+    "assets": []
+  },
+  "release_type": null,
+  "row_count": null,
+  "created_at": null,
+  "history": {
+    "release_tags": [],
+    "delta_tags": []
+  },
+  "policy": {
+    "rerun_window_trading_days": 10,
+    "format": "parquet",
+    "hash": "sha256"
+  }
+}
