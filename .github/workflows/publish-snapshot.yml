@@ -50,6 +50,8 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -152,7 +154,7 @@ jobs:
       - name: Download latest release and prepare re-release
         if: inputs.mode == 'from_latest'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
         run: |
           set -euo pipefail
           mkdir -p _tmp
@@ -221,7 +223,7 @@ jobs:
 
       - name: Create release if not exists
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
           TAG: ${{ inputs.tag }}
           RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
@@ -234,7 +236,7 @@ jobs:
 
       - name: Upload release asset
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
           TAG: ${{ inputs.tag }}
         run: |
           fname="$(cat _tmp/asset_name.txt)"
