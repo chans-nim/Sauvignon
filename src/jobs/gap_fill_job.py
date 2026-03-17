@@ -5,6 +5,7 @@ Silver에서 비어 있는 구간(연도별 row 부족)을 찾아 해당 구간�
 """
 from __future__ import annotations
 import argparse
+import inspect
 import time
 from datetime import datetime
 
@@ -17,6 +18,7 @@ log = get_logger(__name__)
 
 PROGRESS_LOG_EVERY = 10  # N건마다 진행률 로그
 DEFAULT_MIN_ROWS_PER_YEAR = 200
+DEFAULT_GAP_FILL_COVERAGE_THRESHOLD = 0.95
 
 
 def _format_eta(seconds: float) -> str:
@@ -32,6 +34,7 @@ def run_gap_fill(
     target_start: str = "2016-01-01",
     target_end: str = "2025-12-31",
     min_rows_per_year: int = DEFAULT_MIN_ROWS_PER_YEAR,
+    coverage_threshold: float = DEFAULT_GAP_FILL_COVERAGE_THRESHOLD,
     merge: bool = True,
     collector=collect_one,
     gap_loader=get_gap_intervals,
@@ -64,7 +67,17 @@ def run_gap_fill(
         return 0, 0, 0
 
     n = len(gap_df)
-    log.info("Gap fill: %s intervals (merged=%s), collecting...", n, merge)
+    log.info(
+        "Gap fill: %s intervals (merged=%s, coverage_threshold=%.2f), collecting...",
+        n,
+        merge,
+        coverage_threshold,
+    )
+    collector_params = inspect.signature(collector).parameters
+    collector_supports_threshold = (
+        "coverage_threshold" in collector_params
+        or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in collector_params.values())
+    )
     for idx, (_, row) in enumerate(gap_df.iterrows(), start=1):
         symbol = str(row["symbol"])
         market = str(row["market"])
@@ -72,7 +85,17 @@ def run_gap_fill(
         start_date = str(row["start_date"])
         end_date = str(row["end_date"])
         log.info("[%s/%s] %s %s..%s", idx, n, symbol, start_date, end_date)
-        sym, ok, err = collector(symbol, market, name, start_date, end_date)
+        if collector_supports_threshold:
+            sym, ok, err = collector(
+                symbol,
+                market,
+                name,
+                start_date,
+                end_date,
+                coverage_threshold=coverage_threshold,
+            )
+        else:
+            sym, ok, err = collector(symbol, market, name, start_date, end_date)
         if ok:
             success += 1
         else:
@@ -107,6 +130,7 @@ def main() -> None:
     parser.add_argument("--target-start", default="2016-01-01", help="목표 구간 시작일")
     parser.add_argument("--target-end", default="2025-12-31", help="목표 구간 종료일")
     parser.add_argument("--min-rows-per-year", type=int, default=DEFAULT_MIN_ROWS_PER_YEAR, help="연도당 이 수 미만이면 갭으로 간주 (기본 200=전체수집 기준)")
+    parser.add_argument("--coverage-threshold", type=float, default=DEFAULT_GAP_FILL_COVERAGE_THRESHOLD, help="기존 데이터 재사용 임계값. gap fill은 기본 0.95로 느슨한 재사용을 줄인다.")
     parser.add_argument("--no-merge", action="store_true", help="연도별 병합 없이 연도 단위로만 수집 (느리지만 세밀)")
     args = parser.parse_args()
 
@@ -114,6 +138,7 @@ def main() -> None:
         target_start=args.target_start,
         target_end=args.target_end,
         min_rows_per_year=args.min_rows_per_year,
+        coverage_threshold=args.coverage_threshold,
         merge=not args.no_merge,
     )
 

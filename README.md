@@ -38,7 +38,11 @@ python -m src.jobs.backfill_job --start-date 2016-01-01 --end-date 2025-12-31 --
 # delta 생성 / 업로드 / 액션 트리거
 python -m src.transform.make_delta --start-date 2025-12-20 --end-date 2025-12-31 --tag data-delta-20251231-1800
 python -m src.publish.upload_to_staging --tag data-delta-20251231-1800
-python -m src.publish.trigger_github_actions --tag data-delta-20251231-1800 --delta-url "https://your-staging.example.com/data-delta-20251231-1800.parquet"
+python -m src.publish.trigger_github_actions --tag data-delta-20251231-1800 --asset-url "https://your-staging.example.com/data-delta-20251231-1800.parquet"
+
+# snapshot 생성 / 액션 트리거
+python -m src.jobs.full_snapshot_job --mode snapshot
+python -m src.publish.trigger_github_actions --tag data-snapshot-20251231-1800 --asset-url "https://your-public-download.example.com/data-snapshot-20251231-1800.parquet"
 ```
 
 ## 초기 10년치 수집 + 백업 + 이후 운영

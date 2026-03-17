@@ -1,0 +1,212 @@
+name: Publish Snapshot Asset (URL -> GitHub Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. data-snapshot-20260316-1800 or data-full-20260316"
+        required: true
+      release_type:
+        description: "Release type: snapshot | full"
+        required: true
+        default: "snapshot"
+      asset_url:
+        description: "Public HTTPS URL (or Google Drive share link) to snapshot/full parquet asset"
+        required: true
+      sha256:
+        description: "Expected sha256 hex"
+        required: true
+      min_date:
+        description: "Min date in asset (YYYY-MM-DD)"
+        required: false
+      max_date:
+        description: "Max date in asset (YYYY-MM-DD)"
+        required: false
+      asset_name:
+        description: "Asset filename for release (required when using Google Drive URL)"
+        required: false
+      row_count:
+        description: "Optional row count for manifest metadata"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Acquire lock
+        run: |
+          python3 - << 'PY'
+          import json, os, datetime
+          from pathlib import Path
+          lock_path = Path("LOCK.json")
+          now = datetime.datetime.now(datetime.timezone.utc)
+          if lock_path.exists():
+              lock = json.loads(lock_path.read_text(encoding="utf-8"))
+              exp = lock.get("expires_at")
+              if lock.get("locked") and exp:
+                  exp_dt = datetime.datetime.fromisoformat(exp.replace("Z","+00:00"))
+                  if exp_dt > now:
+                      raise SystemExit(f"LOCKED by {lock.get('owner')} until {exp_dt.isoformat()}")
+          lock = {
+              "locked": True,
+              "owner": "github-actions",
+              "run_id": os.environ.get("GITHUB_RUN_ID"),
+              "started_at": now.isoformat().replace("+00:00","Z"),
+              "expires_at": (now + datetime.timedelta(hours=2)).isoformat().replace("+00:00","Z")
+          }
+          lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+          git add LOCK.json
+          git commit -m "chore: acquire lock" || true
+          git push || true
+
+      - name: Download asset from URL
+        env:
+          ASSET_URL: ${{ inputs.asset_url }}
+          ASSET_NAME: ${{ inputs.asset_name }}
+          STAGING_AUTH_HEADER: ${{ secrets.STAGING_AUTH_HEADER }}
+        run: |
+          set -euo pipefail
+          mkdir -p _tmp
+          url="${ASSET_URL}"
+          fname="${ASSET_NAME}"
+          if [ -z "${fname}" ]; then
+            fname="$(basename "${url%%\?*}")"
+          fi
+          if echo "$url" | grep -q 'drive\.google\.com'; then
+            echo "Downloading from Google Drive (gdown)..."
+            python3 -m pip install -q gdown
+            file_id=""
+            if echo "$url" | grep -qE '/d/[a-zA-Z0-9_-]+'; then
+              file_id="$(echo "$url" | sed -n 's/.*\/d\/\([a-zA-Z0-9_-]*\)\/.*/\1/p')"
+            fi
+            if [ -z "$file_id" ]; then
+              file_id="$(echo "$url" | sed -n 's/.*[?&]id=\([a-zA-Z0-9_-]*\).*/\1/p')"
+            fi
+            if [ -z "$file_id" ]; then
+              echo "Could not extract Google Drive FILE_ID from URL"
+              exit 1
+            fi
+            if [ -z "${ASSET_NAME}" ] || [ "$fname" = "uc" ] || [ "$fname" = "view" ]; then
+              echo "When using Google Drive, please set asset_name (e.g. data-snapshot-20260317-1338.parquet)"
+              exit 1
+            fi
+            gdown "https://drive.google.com/uc?id=${file_id}" -O "_tmp/$fname"
+          else
+            if [ -n "${STAGING_AUTH_HEADER:-}" ]; then
+              curl -L --fail -H "${STAGING_AUTH_HEADER}" -o "_tmp/$fname" "$url"
+            else
+              curl -L --fail -o "_tmp/$fname" "$url"
+            fi
+          fi
+          echo "$fname" > _tmp/asset_name.txt
+
+      - name: Verify sha256
+        env:
+          EXPECTED: ${{ inputs.sha256 }}
+        run: |
+          set -euo pipefail
+          fname="$(cat _tmp/asset_name.txt)"
+          got="$(sha256sum "_tmp/$fname" | awk '{print $1}')"
+          test "$got" = "$EXPECTED"
+
+      - name: Create release if not exists
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          TAG: ${{ inputs.tag }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release exists: $TAG"
+          else
+            gh release create "$TAG" -t "$TAG" -n "${RELEASE_TYPE^} dataset: $TAG"
+          fi
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          fname="$(cat _tmp/asset_name.txt)"
+          gh release upload "$TAG" "_tmp/$fname" --clobber
+
+      - name: Ensure manifest file
+        run: |
+          test -f data_manifest.json || printf '%s\n' '{"schema_version":2,"latest_current":null,"latest_full":null,"latest_delta":{"tag":null,"release_type":"delta","file_name":null,"sha256":null,"row_count":null,"created_at":null,"min_date":null,"max_date":null,"assets":[]},"release_type":null,"row_count":null,"created_at":null,"history":{"release_tags":[],"delta_tags":[]},"policy":{"rerun_window_trading_days":10,"format":"parquet","hash":"sha256"}}' > data_manifest.json
+
+      - name: Update manifest
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          ASSET_SHA256: ${{ inputs.sha256 }}
+          MIN_DATE: ${{ inputs.min_date }}
+          MAX_DATE: ${{ inputs.max_date }}
+          ROW_COUNT: ${{ inputs.row_count }}
+        run: |
+          python3 - << 'PY'
+          import json, os
+          from datetime import datetime
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, ".")
+          from src.publish.manifest_update import ensure_manifest_structure, build_release_entry, update_manifest_payload
+          path = Path("data_manifest.json")
+          m = ensure_manifest_structure(json.loads(path.read_text(encoding="utf-8")))
+          tag = os.environ["TAG"]
+          release_type = os.environ["RELEASE_TYPE"]
+          sha = os.environ["ASSET_SHA256"]
+          min_date = os.environ.get("MIN_DATE") or None
+          max_date = os.environ.get("MAX_DATE") or None
+          row_count = os.environ.get("ROW_COUNT") or None
+          fname = Path("_tmp/asset_name.txt").read_text(encoding="utf-8").strip()
+          bytes_ = Path("_tmp", fname).stat().st_size
+          created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+          entry = build_release_entry(
+            tag=tag,
+            release_type=release_type,
+            file_name=fname,
+            sha256=sha,
+            bytes_size=bytes_,
+            created_at=created_at,
+            row_count=(int(row_count) if row_count else None),
+            min_date=min_date,
+            max_date=max_date,
+          )
+          m = update_manifest_payload(m, entry)
+          path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+          git add data_manifest.json
+          git commit -m "data: update manifest for $TAG" || true
+          git push
+
+      - name: Release lock
+        if: always()
+        run: |
+          python3 - << 'PY'
+          import json
+          from pathlib import Path
+          lock_path = Path("LOCK.json")
+          if lock_path.exists():
+              lock = json.loads(lock_path.read_text(encoding="utf-8"))
+              lock["locked"] = False
+              lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+          git add LOCK.json
+          git commit -m "chore: release lock" || true
+          git push || true

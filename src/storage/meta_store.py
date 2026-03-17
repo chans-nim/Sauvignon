@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 import duckdb
 import pandas as pd
 from src.common.settings import settings
@@ -6,8 +7,25 @@ from src.common.settings import settings
 META_DB = settings.project_root / "meta" / "meta.duckdb"
 META_DB.parent.mkdir(parents=True, exist_ok=True)
 
+CONNECT_RETRIES = 5
+CONNECT_RETRY_DELAY_SEC = 2.0
+
+
 def connect():
-    return duckdb.connect(META_DB.as_posix())
+    last_err = None
+    for attempt in range(CONNECT_RETRIES):
+        try:
+            return duckdb.connect(META_DB.as_posix())
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            if "already open" in msg or "locked" in msg or "another process" in msg or "cannot open file" in msg:
+                if attempt < CONNECT_RETRIES - 1:
+                    time.sleep(CONNECT_RETRY_DELAY_SEC * (attempt + 1))
+                    continue
+            raise
+    if last_err:
+        raise last_err
 
 def ensure_tables() -> None:
     con = connect()
