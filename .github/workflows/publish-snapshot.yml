@@ -1,21 +1,29 @@
-name: Publish Snapshot Asset (URL -> GitHub Release)
+name: Publish Snapshot Asset (URL or Latest Release -> GitHub Release)
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Bootstrap = download from URL (초기 1회). FromLatest = use latest release and re-release (이후)"
+        required: true
+        default: "bootstrap"
+        type: choice
+        options:
+          - bootstrap
+          - from_latest
       tag:
-        description: "Release tag, e.g. data-snapshot-20260316-1800 or data-full-20260316"
+        description: "Release tag (e.g. data-snapshot-20260316-1800). For from_latest this is the NEW tag to create"
         required: true
       release_type:
         description: "Release type: snapshot | full"
         required: true
         default: "snapshot"
       asset_url:
-        description: "Public HTTPS URL (or Google Drive share link) to snapshot/full parquet asset"
-        required: true
+        description: "[Bootstrap only] Public HTTPS or Google Drive URL to parquet asset"
+        required: false
       sha256:
-        description: "Expected sha256 hex"
-        required: true
+        description: "[Bootstrap only] Expected sha256 hex"
+        required: false
       min_date:
         description: "Min date in asset (YYYY-MM-DD)"
         required: false
@@ -23,7 +31,7 @@ on:
         description: "Max date in asset (YYYY-MM-DD)"
         required: false
       asset_name:
-        description: "Asset filename for release (required when using Google Drive URL)"
+        description: "Asset filename (optional; for Drive URL default from tag)"
         required: false
       row_count:
         description: "Optional row count for manifest metadata"
@@ -75,15 +83,21 @@ jobs:
           git commit -m "chore: acquire lock" || true
           git push || true
 
-      - name: Download asset from URL
+      - name: Download asset from URL (bootstrap)
+        if: inputs.mode == 'bootstrap'
         env:
           ASSET_URL: ${{ inputs.asset_url }}
           ASSET_NAME: ${{ inputs.asset_name }}
+          TAG: ${{ inputs.tag }}
           STAGING_AUTH_HEADER: ${{ secrets.STAGING_AUTH_HEADER }}
         run: |
           set -euo pipefail
           mkdir -p _tmp
           url="${ASSET_URL}"
+          if [ -z "$url" ]; then
+            echo "Bootstrap mode requires asset_url"
+            exit 1
+          fi
           fname="${ASSET_NAME}"
           if [ -z "${fname}" ]; then
             fname="$(basename "${url%%\?*}")"
@@ -102,9 +116,9 @@ jobs:
               echo "Could not extract Google Drive FILE_ID from URL"
               exit 1
             fi
-            if [ -z "${ASSET_NAME}" ] || [ "$fname" = "uc" ] || [ "$fname" = "view" ]; then
-              echo "When using Google Drive, please set asset_name (e.g. data-snapshot-20260317-1338.parquet)"
-              exit 1
+            if [ -z "${fname}" ] || [ "$fname" = "uc" ] || [ "$fname" = "view" ]; then
+              fname="${TAG}.parquet"
+              echo "Using default asset_name: $fname"
             fi
             gdown "https://drive.google.com/uc?id=${file_id}" -O "_tmp/$fname"
           else
@@ -116,13 +130,74 @@ jobs:
           fi
           echo "$fname" > _tmp/asset_name.txt
 
+      - name: Download latest release and prepare re-release
+        if: inputs.mode == 'from_latest'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          mkdir -p _tmp
+          echo "Fetching latest release..."
+          LATEST_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing release found. Use bootstrap mode first with asset_url."
+            exit 1
+          fi
+          echo "Latest release: $LATEST_TAG"
+          gh release download "$LATEST_TAG" -D _tmp
+          fname=$(ls _tmp/*.parquet 2>/dev/null | head -1 | xargs basename)
+          if [ -z "$fname" ]; then
+            echo "No parquet asset in latest release"
+            exit 1
+          fi
+          echo "$fname" > _tmp/asset_name.txt
+          if [ -f "_tmp/"*".sha256" ]; then
+            sha256_file=$(ls _tmp/*.sha256 2>/dev/null | head -1)
+            cat "$sha256_file" | awk '{print $1}' > _tmp/expected_sha256.txt
+          else
+            touch _tmp/expected_sha256.txt
+          fi
+
+      - name: Resolve expected sha256
+        id: sha256_resolve
+        run: |
+          if [ "${{ inputs.mode }}" = "from_latest" ]; then
+            if [ -s _tmp/expected_sha256.txt ]; then
+              v=$(head -1 _tmp/expected_sha256.txt | tr -d '\n\r')
+              echo "expected=$v" >> $GITHUB_OUTPUT
+            else
+              python3 - << 'PY'
+          import json, os
+          from pathlib import Path
+          p = Path("data_manifest.json")
+          if not p.exists():
+              raise SystemExit("from_latest: data_manifest.json not found; run bootstrap first")
+          m = json.loads(p.read_text(encoding="utf-8"))
+          lc = m.get("latest_current") or {}
+          sha = (lc.get("sha256") or "").strip()
+          if not sha:
+              raise SystemExit("from_latest: latest_current.sha256 not in data_manifest.json")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"expected={sha}\n")
+          PY
+            fi
+          else
+            if [ -z "${{ inputs.sha256 }}" ]; then
+              echo "Bootstrap mode requires sha256 input"
+              exit 1
+            fi
+            echo "expected=${{ inputs.sha256 }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Verify sha256
         env:
-          EXPECTED: ${{ inputs.sha256 }}
+          EXPECTED: ${{ steps.sha256_resolve.outputs.expected }}
         run: |
           set -euo pipefail
           fname="$(cat _tmp/asset_name.txt)"
           got="$(sha256sum "_tmp/$fname" | awk '{print $1}')"
+          echo "Expected: $EXPECTED"
+          echo "Got:      $got"
           test "$got" = "$EXPECTED"
 
       - name: Create release if not exists
@@ -154,7 +229,8 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           RELEASE_TYPE: ${{ inputs.release_type }}
-          ASSET_SHA256: ${{ inputs.sha256 }}
+          MODE: ${{ inputs.mode }}
+          ASSET_SHA256: ${{ steps.sha256_resolve.outputs.expected }}
           MIN_DATE: ${{ inputs.min_date }}
           MAX_DATE: ${{ inputs.max_date }}
           ROW_COUNT: ${{ inputs.row_count }}
@@ -170,10 +246,17 @@ jobs:
           m = ensure_manifest_structure(json.loads(path.read_text(encoding="utf-8")))
           tag = os.environ["TAG"]
           release_type = os.environ["RELEASE_TYPE"]
-          sha = os.environ["ASSET_SHA256"]
+          mode = os.environ.get("MODE", "bootstrap")
+          sha = os.environ.get("ASSET_SHA256") or ""
           min_date = os.environ.get("MIN_DATE") or None
           max_date = os.environ.get("MAX_DATE") or None
           row_count = os.environ.get("ROW_COUNT") or None
+          if mode == "from_latest" and (not min_date or not max_date or row_count is None or not row_count):
+              lc = m.get("latest_current") or {}
+              min_date = min_date or lc.get("min_date")
+              max_date = max_date or lc.get("max_date")
+              if row_count is None or row_count == "":
+                  row_count = lc.get("row_count")
           fname = Path("_tmp/asset_name.txt").read_text(encoding="utf-8").strip()
           bytes_ = Path("_tmp", fname).stat().st_size
           created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -184,7 +267,7 @@ jobs:
             sha256=sha,
             bytes_size=bytes_,
             created_at=created_at,
-            row_count=(int(row_count) if row_count else None),
+            row_count=int(row_count) if row_count else None,
             min_date=min_date,
             max_date=max_date,
           )
