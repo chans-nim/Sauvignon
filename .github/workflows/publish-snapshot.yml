@@ -13,17 +13,20 @@ on:
           - from_latest
       tag:
         description: "Release tag (e.g. data-snapshot-20260316-1800). For from_latest this is the NEW tag to create"
-        required: true
+        required: false
+        default: "data-snapshot-20260317-1338"
       release_type:
         description: "Release type: snapshot | full"
         required: true
         default: "snapshot"
       asset_url:
-        description: "[Bootstrap only] Public HTTPS or Google Drive URL to parquet asset"
+        description: "[Bootstrap only] Parquet URL"
         required: false
+        default: "https://drive.google.com/file/d/1kWG4xA5Sc-_0I41Ut53SW7StVAHHXo7u/view?usp=sharing"
       sha256:
-        description: "[Bootstrap only] Expected sha256 hex"
+        description: "[Bootstrap only] Expected sha256 hex (for data-snapshot-20260317-1338)"
         required: false
+        default: "7043c7b4d678d60aead30d92798c3e75ac155957760c5b6f644e7ec2f2827644"
       min_date:
         description: "Min date in asset (YYYY-MM-DD)"
         required: false
@@ -83,10 +86,26 @@ jobs:
           git commit -m "chore: acquire lock" || true
           git push || true
 
+      - name: Resolve bootstrap defaults
+        id: bootstrap_defaults
+        if: inputs.mode == 'bootstrap'
+        run: |
+          TAG="${{ inputs.tag }}"
+          ASSET_URL="${{ inputs.asset_url }}"
+          DEFAULT_TAG="data-snapshot-20260317-1338"
+          DEFAULT_PARQUET_URL="https://drive.google.com/file/d/1kWG4xA5Sc-_0I41Ut53SW7StVAHHXo7u/view?usp=sharing"
+          if [ -z "${ASSET_URL}" ] && [ "${TAG}" = "${DEFAULT_TAG}" ]; then
+            echo "Using default asset_url for tag ${DEFAULT_TAG}"
+            echo "asset_url=${DEFAULT_PARQUET_URL}" >> $GITHUB_OUTPUT
+          else
+            echo "asset_url=${ASSET_URL}" >> $GITHUB_OUTPUT
+          fi
+          echo "sha256=${{ inputs.sha256 }}" >> $GITHUB_OUTPUT
+
       - name: Download asset from URL (bootstrap)
         if: inputs.mode == 'bootstrap'
         env:
-          ASSET_URL: ${{ inputs.asset_url }}
+          ASSET_URL: ${{ steps.bootstrap_defaults.outputs.asset_url }}
           ASSET_NAME: ${{ inputs.asset_name }}
           TAG: ${{ inputs.tag }}
           STAGING_AUTH_HEADER: ${{ secrets.STAGING_AUTH_HEADER }}
@@ -95,7 +114,7 @@ jobs:
           mkdir -p _tmp
           url="${ASSET_URL}"
           if [ -z "$url" ]; then
-            echo "Bootstrap mode requires asset_url"
+            echo "Bootstrap mode requires asset_url (or use tag data-snapshot-20260317-1338 for default URL)"
             exit 1
           fi
           fname="${ASSET_NAME}"
