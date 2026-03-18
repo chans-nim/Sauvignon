@@ -108,18 +108,29 @@ jobs:
           PUBLISH_TAG: ${{ inputs.publish_tag }}
         run: |
           python - << 'PY'
-          import json, os, subprocess, sys, re
+          import json, os, subprocess, sys
           cmd = [sys.executable, "-m", "src.jobs.full_snapshot_job", "--mode", "snapshot"]
           publish_tag = (os.environ.get("PUBLISH_TAG") or "").strip()
           if publish_tag:
               cmd += ["--tag", publish_tag]
           p = subprocess.run(cmd, capture_output=True, text=True, check=True)
-          # full_snapshot_job prints JSON to stdout at end
-          m = re.search(r"\n\\{[\\s\\S]*\\}\\s*$", p.stdout)
-          if not m:
-              print(p.stdout)
-              raise SystemExit("Could not find snapshot build JSON output")
-          payload = json.loads(m.group(0))
+          # full_snapshot_job prints JSON at the end, but may include logs.
+          out = (p.stdout or "").strip()
+          # Try to parse the last JSON object from stdout.
+          i = out.rfind("{")
+          if i < 0:
+              print(out)
+              raise SystemExit("Could not find JSON in snapshot build output")
+          payload_text = out[i:]
+          try:
+              payload = json.loads(payload_text)
+          except Exception:
+              # Fallback: find a line that starts with '{' and use the last one
+              candidates = [ln for ln in out.splitlines() if ln.lstrip().startswith("{")]
+              if not candidates:
+                  print(out)
+                  raise
+              payload = json.loads(candidates[-1])
           print(json.dumps(payload, ensure_ascii=False))
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"tag={payload['tag']}\n")
