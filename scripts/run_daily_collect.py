@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import subprocess
 import sys
 
@@ -53,12 +53,10 @@ def get_last_silver_date() -> date | None:
     if not row or row[0] is None:
         return None
     v = row[0]
-    # duckdb may return datetime/date depending on parquet type
-    if hasattr(v, "date") and not isinstance(v, date):
-        try:
-            return v.date()
-        except Exception:
-            pass
+    # duckdb may return datetime/date depending on parquet type.
+    # NOTE: datetime is a subclass of date, so handle it first.
+    if isinstance(v, datetime):
+        return v.date()
     if isinstance(v, date):
         return v
     # last resort: parse ISO-like string
