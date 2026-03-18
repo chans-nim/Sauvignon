@@ -52,7 +52,20 @@ def get_last_silver_date() -> date | None:
         con.close()
     if not row or row[0] is None:
         return None
-    return row[0]
+    v = row[0]
+    # duckdb may return datetime/date depending on parquet type
+    if hasattr(v, "date") and not isinstance(v, date):
+        try:
+            return v.date()
+        except Exception:
+            pass
+    if isinstance(v, date):
+        return v
+    # last resort: parse ISO-like string
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except Exception:
+        return None
 
 
 def run_incremental(start: date, end: date) -> None:
