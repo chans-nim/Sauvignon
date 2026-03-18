@@ -31,12 +31,18 @@ def main() -> None:
     parser.add_argument("--target-end", default="2025-12-31")
     parser.add_argument("--min-rows-per-year", type=int, default=MIN_ROWS_PER_YEAR)
     parser.add_argument("--sample-limit", type=int, default=15)
+    parser.add_argument(
+        "--allow-missing-meta",
+        action="store_true",
+        help="If meta.duckdb is missing, run summary/integrity/coverage only (skip universe checks).",
+    )
     args = parser.parse_args()
 
-    if not META_DB.exists():
-        raise FileNotFoundError(META_DB)
     snapshot_path = resolve_snapshot_path(args.tag, args.file_path)
     snapshot = snapshot_path.as_posix()
+    meta_available = META_DB.exists()
+    if not meta_available and not args.allow_missing_meta:
+        raise FileNotFoundError(META_DB)
 
     con = duckdb.connect()
     try:
@@ -93,6 +99,12 @@ def main() -> None:
             ).fetchdf().to_string(index=False)
         )
         print()
+
+        if not meta_available:
+            print("[universe_vs_snapshot]")
+            print("(meta.duckdb not found; skipped. Re-run with meta present for full universe/short-year checks.)")
+            print()
+            return
 
         con.execute(f"ATTACH '{META_DB.as_posix()}' AS meta (READ_ONLY)")
 
