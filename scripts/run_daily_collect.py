@@ -13,6 +13,33 @@ from src.common.settings import settings
 log = get_logger(__name__)
 
 
+def check_last_collect_failure() -> None:
+    """
+    직전 collect_daily run_log에서 전량 실패(total > 0 and success == 0)면 워크플로 실패를 위해 exit(1).
+    KIS 키 오류/한도 등으로 수집이 하나도 안 된 상태에서 스냅샷을 덮어쓰지 않도록 한다.
+    """
+    meta_store.ensure_tables()
+    con = meta_store.connect()
+    try:
+        row = con.execute(
+            """
+            SELECT total_symbols, success_symbols, failed_symbols
+            FROM run_log
+            WHERE job_name = 'collect_daily'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    finally:
+        con.close()
+    if not row:
+        return
+    total, success, failed = int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+    if total > 0 and success == 0:
+        log.error("collect_daily: all %s symbols failed; exiting so workflow does not publish stale snapshot", total)
+        sys.exit(1)
+
+
 def get_last_success_date() -> date | None:
     """
     collect_state에서 1d 타임프레임의 마지막 성공일을 조회한다.
@@ -95,10 +122,11 @@ def run_incremental_and_gap_fill(
 
 
 def main() -> None:
+    # 당일까지 수집(target_end = 오늘). 로컬 TZ 사용, Actions에서는 TZ=Asia/Seoul(KST) 적용.
+    # 오늘은 가격 변동이 있을 수 있으므로, 이미 당일 데이터가 있어도 매 run에서 갱신한다.
     today = date.today()
-    target_end = today - timedelta(days=1)
+    target_end = today
     if target_end < date(2000, 1, 1):
-        # 비정상적인 시스템 시간 보호
         log.info("system date looks wrong, skip collect")
         return
 
@@ -113,10 +141,15 @@ def main() -> None:
 
     start = last_success + timedelta(days=1)
     if start > target_end:
-        log.info("no new trading days to collect (%s > %s)", start, target_end)
-        return
+        # 이미 당일까지 있음 → 오늘만 다시 수집해 최신 가격으로 갱신
+        start = today
+        end = today
+        log.info("refreshing today only: %s", end.isoformat())
+    else:
+        end = target_end
 
-    run_incremental_and_gap_fill(start, target_end)
+    run_incremental_and_gap_fill(start, end)
+    check_last_collect_failure()
 
 
 if __name__ == "__main__":

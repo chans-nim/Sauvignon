@@ -17,10 +17,13 @@ htmlcov/
 venv/
 .venv/
 
-# Local build artifacts and generated reports
-/chart_*.png
-/report_*.txt
+# Local build artifacts and generated reports (excluded from Git)
 /reports/
+/reports_test/
+/reports_test2/
+/report_*.txt
+/chart_*.png
+/release_validation_report*.md
 /backups/
 
 # Local data lake and staging outputs

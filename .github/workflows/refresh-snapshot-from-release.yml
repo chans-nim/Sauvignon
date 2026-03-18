@@ -1,3 +1,16 @@
+# Refresh Snapshot from GitHub Release
+#
+# 실패 가능 지점 요약:
+# - Acquire lock 실패: 동시 실행 방지용; push 실패 시 job 실패 (의도됨).
+# - Sync from Release: GH_TOKEN/권한, release에 *.parquet 없음, sha256 불일치 시 실패.
+# - Refresh universe: KOSPI/KOSDAQ master 다운로드 실패 시 실패 (최대 3회 재시도).
+# - Incremental collect: KIS 시크릿 없음/만료/한도 초과 시 일부·전량 실패.
+#   전량 실패 시 run_daily_collect가 exit(1)하여 스냅샷 덮어쓰기 방지.
+# - Build snapshot: silver 없음/스키마 오류 시 실패.
+# - Validate: 품질 기준 미달 시 실패 (배포 전 차단).
+# - Create release / Upload assets: GH 권한·용량 한도 시 실패.
+# - Update data_manifest.json 후 push: 충돌 시 실패 (동시 수정 없으면 정상).
+# - Release lock (if: always()): 실패해도 다음 run에서 lock 만료 후 진행 가능.
 name: Refresh Snapshot from GitHub Release
 
 on:
@@ -73,7 +86,7 @@ jobs:
           PY
           git add LOCK.json
           git commit -m "chore: acquire lock" || true
-          git push || true
+          git push
 
       - name: Sync base snapshot from GitHub Release to silver
         env:
@@ -94,6 +107,7 @@ jobs:
 
       - name: Incremental collect + gap fill (keep latest)
         env:
+          TZ: Asia/Seoul
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           KIS_USER_ID: ${{ secrets.KIS_USER_ID }}

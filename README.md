@@ -85,6 +85,14 @@ python -m src.publish.trigger_github_actions --tag data-snapshot-20251231-1800 -
    python -m scripts.run_daily_collect
    ```
 
+   **증분 구간 수동 복구** (스케줄 미실행 등으로 특정 구간이 비었을 때):
+
+   ```bash
+   # 3/10 ~ 3/18 구간만 수집 (날짜는 실제 비어 있는 구간으로 변경)
+   python -m src.jobs.incremental_job --start-date 2026-03-10 --end-date 2026-03-18
+   python -m src.jobs.gap_fill_job --target-start 2026-03-10 --target-end 2026-03-18 --merge
+   ```
+
 6. **실패 종목만 재수집**  
    `collect_state`에 `last_error`가 있는 종목만 골라서 지정 기간으로 다시 수집합니다.
 

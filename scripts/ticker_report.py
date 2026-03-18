@@ -33,6 +33,7 @@ RAW_OHLCV_DIR = settings.project_root / "data" / "raw" / "ohlcv"
 TARGET_START = "2016-01-01"
 TARGET_END = "2025-12-31"
 MIN_ROWS_PER_YEAR = 200
+RECENT_MONTHS = 3
 
 
 OUTPUT1_FIELDS = {
@@ -315,6 +316,37 @@ def plot_silver_overview(df: pd.DataFrame, symbol: str, out_path: Path) -> None:
     plt.close()
 
 
+def plot_recent_silver(df: pd.DataFrame, symbol: str, out_path: Path, *, months: int = RECENT_MONTHS) -> None:
+    """
+    최근 N개월 Silver(릴리즈/증분 반영) 기준 차트.
+    raw(output2) 대신 Silver 기반으로 최신 구간을 확인할 수 있게 해줌.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    if df.empty:
+        return
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True, height_ratios=[3, 1])
+    x = df["date"]
+    ax1.plot(x, df["close"], color="steelblue", linewidth=1.2, label="Close")
+    if {"low", "high"}.issubset(df.columns):
+        ax1.fill_between(x, df["low"], df["high"], color="steelblue", alpha=0.12, label="Low-High")
+    ax1.set_title(f"{symbol} Recent {months}M (Silver)")
+    ax1.set_ylabel("Price")
+    ax1.legend(loc="upper left")
+    ax1.grid(True, alpha=0.3)
+
+    ax2.bar(x, df["volume"] / 1e6, color="gray", alpha=0.7, width=2)
+    ax2.set_ylabel("Volume (M)")
+    ax2.grid(True, alpha=0.3)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
 def plot_raw_output2(df: pd.DataFrame, symbol: str, out_path: Path) -> None:
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
@@ -374,14 +406,21 @@ def build_report(
     output2_df = normalize_output2_rows(output2_rows)
     output2_recent_df = load_output2_recent_six_months(symbol)
 
+    # 최근 구간은 raw이 아니라 Silver(릴리즈/증분 반영) 기준으로 표시
+    recent_silver_df = pd.DataFrame()
+    if not silver_df.empty:
+        latest_date = silver_df["date"].max()
+        cutoff = (latest_date - pd.DateOffset(months=RECENT_MONTHS)).normalize()
+        recent_silver_df = silver_df[silver_df["date"] >= cutoff].copy()
+
     silver_chart = out_dir / f"{symbol}_silver_overview.png"
-    raw_chart = out_dir / f"{symbol}_raw_output2.png"
+    raw_chart = out_dir / f"{symbol}_recent_{RECENT_MONTHS}m_silver.png"
     year_chart = out_dir / f"{symbol}_yearly_rows.png"
     if not silver_df.empty:
         plot_silver_overview(silver_df, symbol, silver_chart)
         plot_yearly_rows(coverage, symbol, year_chart)
-    if not output2_recent_df.empty:
-        plot_raw_output2(output2_recent_df, symbol, raw_chart)
+    if not recent_silver_df.empty:
+        plot_recent_silver(recent_silver_df, symbol, raw_chart, months=RECENT_MONTHS)
 
     output1_table = render_html_table(
         ["필드코드", "표시명", "실제값", "의미"],
@@ -394,20 +433,20 @@ def build_report(
     ) if not output2_recent_df.empty else '<p class="empty">최근 6개월 output2 없음</p>'
 
     recent_rows_html = '<p class="empty">recent rows 없음</p>'
-    if not output2_recent_df.empty:
-        tail = output2_recent_df.tail(10).copy()
+    if not recent_silver_df.empty:
+        tail = recent_silver_df.tail(10).copy()
         tail["date"] = tail["date"].dt.strftime("%Y-%m-%d")
         recent_rows_html = render_html_table(
             ["date", "open", "high", "low", "close", "volume", "value"],
             [
                 [
                     r["date"],
-                    fmt_num(r.get("stck_oprc")),
-                    fmt_num(r.get("stck_hgpr")),
-                    fmt_num(r.get("stck_lwpr")),
-                    fmt_num(r.get("stck_clpr")),
-                    fmt_num(r.get("acml_vol")),
-                    fmt_num(r.get("acml_tr_pbmn")),
+                    fmt_num(r.get("open")),
+                    fmt_num(r.get("high")),
+                    fmt_num(r.get("low")),
+                    fmt_num(r.get("close")),
+                    fmt_num(r.get("volume")),
+                    fmt_num(r.get("value")),
                 ]
                 for _, r in tail.iterrows()
             ],
@@ -455,7 +494,53 @@ def build_report(
             f"{yearly_table}"
         )
 
-    raw_section = '<p class="empty">최신 raw JSON 파일이 없습니다.</p>'
+    recent_silver_stats_html = '<p class="empty">최근 Silver 요약 통계 없음</p>'
+    if not recent_silver_df.empty:
+        recent_silver_stats_html = render_html_table(
+            ["항목", "값", "의미"],
+            [
+                [
+                    "window_range",
+                    f"{recent_silver_df['date'].min().date()} ~ {recent_silver_df['date'].max().date()}",
+                    f"최근 {RECENT_MONTHS}개월 Silver 구간",
+                ],
+                ["rows", fmt_num(len(recent_silver_df)), f"최근 {RECENT_MONTHS}개월 구간 행 수"],
+                ["close_min", fmt_num(recent_silver_df["close"].min()), "종가 최저값"],
+                ["close_max", fmt_num(recent_silver_df["close"].max()), "종가 최고값"],
+                ["close_mean", fmt_num(round(recent_silver_df["close"].mean())), "종가 평균"],
+                ["volume_mean", fmt_num(round(recent_silver_df["volume"].mean())), "거래량 평균"],
+                ["value_mean", fmt_num(round(recent_silver_df["value"].mean())), "거래대금 평균"],
+            ],
+        )
+
+    silver_recent_field_table = '<p class="empty">최근 Silver 샘플 값 없음</p>'
+    if not recent_silver_df.empty:
+        last = recent_silver_df.iloc[-1]
+        last_date = last["date"].date() if hasattr(last["date"], "date") else last["date"]
+        silver_recent_field_table = render_html_table(
+            ["필드코드", "표시명", "최근 샘플값", "의미"],
+            [
+                ["date", "영업일자", str(last_date), f"최근 {RECENT_MONTHS}개월 Silver 마지막 거래일"],
+                ["open", "시가", fmt_num(last.get("open")), "해당 거래일 시가"],
+                ["high", "고가", fmt_num(last.get("high")), "해당 거래일 고가"],
+                ["low", "저가", fmt_num(last.get("low")), "해당 거래일 저가"],
+                ["close", "종가", fmt_num(last.get("close")), "해당 거래일 종가"],
+                ["volume", "거래량", fmt_num(last.get("volume")), "해당 거래일 거래량"],
+                ["value", "거래대금", fmt_num(last.get("value")), "해당 거래일 거래대금"],
+            ],
+        )
+    recent_silver_block_html = recent_silver_stats_html
+    if not recent_silver_df.empty:
+        recent_silver_block_html = (
+            f'<h3>3-2. 최근 {RECENT_MONTHS}개월 Silver 샘플(마지막 거래일)</h3>'
+            + silver_recent_field_table
+            + f'<h3>3-3. 최근 {RECENT_MONTHS}개월 Silver 샘플</h3>'
+            + recent_rows_html
+            + f'<h3>3-4. 최근 {RECENT_MONTHS}개월 Silver 요약 통계</h3>'
+            + recent_silver_stats_html
+            + f'<div class="chart-grid"><figure><img src="{html.escape(raw_chart.name)}" alt="recent silver chart"></figure></div>'
+        )
+    raw_section = recent_silver_block_html
     if raw_path is not None and raw_data is not None:
         raw_stats = render_html_table(
             ["항목", "값", "의미"],
@@ -471,27 +556,15 @@ def build_report(
         raw_section += '<h3>3-1. output1 실제값 정리</h3>'
         raw_section += '<p>output1은 조회 시점의 종목 스냅샷 값입니다. 가격, 호가, 거래량, 밸류에이션 지표를 담습니다.</p>'
         raw_section += output1_table
-        raw_section += '<h3>3-2. output2 필드 설명</h3>'
-        raw_section += '<p>output2는 일자별 시계열 데이터입니다. 아래 표/차트/통계는 최신 raw 파일 1개가 아니라, 해당 종목 raw 파일 전체를 합쳐 중복 제거한 뒤 최신 날짜 기준 최근 6개월로 잘라서 표시합니다.</p>'
-        raw_section += output2_field_table
-        if not output2_recent_df.empty:
-            raw_stats2 = render_html_table(
-                ["항목", "값", "의미"],
-                [
-                    ["window_range", f"{output2_recent_df['date'].min().date()} ~ {output2_recent_df['date'].max().date()}", "전체 raw output2를 합친 뒤 최신 날짜 기준 최근 6개월 구간"],
-                    ["rows", fmt_num(len(output2_recent_df)), "최근 6개월 구간 행 수"],
-                    ["close_min", fmt_num(output2_recent_df["stck_clpr"].min()), "종가 최저값"],
-                    ["close_max", fmt_num(output2_recent_df["stck_clpr"].max()), "종가 최고값"],
-                    ["close_mean", fmt_num(round(output2_recent_df["stck_clpr"].mean())), "종가 평균"],
-                    ["volume_mean", fmt_num(round(output2_recent_df["acml_vol"].mean())), "거래량 평균"],
-                    ["value_mean", fmt_num(round(output2_recent_df["acml_tr_pbmn"].mean())), "거래대금 평균"],
-                ],
-            )
-            raw_section += '<h3>3-3. output2 최근 6개월 샘플</h3>'
+        raw_section += f'<h3>3-2. 최근 {RECENT_MONTHS}개월 Silver 샘플(마지막 거래일)</h3>'
+        raw_section += '<p>본 리포트에서 “최근 구간”으로 표시하는 가격/거래량/거래대금 값은 raw(output2)가 아니라 Silver(릴리즈/증분 반영) 기준입니다.</p>'
+        raw_section += silver_recent_field_table
+        if not recent_silver_df.empty:
+            raw_section += f'<h3>3-3. 최근 {RECENT_MONTHS}개월 Silver 샘플</h3>'
             raw_section += recent_rows_html
-            raw_section += '<h3>3-4. output2 요약 통계 (최근 6개월)</h3>'
-            raw_section += raw_stats2
-            raw_section += f'<div class="chart-grid"><figure><img src="{html.escape(raw_chart.name)}" alt="raw output2 chart"></figure></div>'
+            raw_section += f'<h3>3-4. 최근 {RECENT_MONTHS}개월 Silver 요약 통계</h3>'
+            raw_section += recent_silver_stats_html
+            raw_section += f'<div class="chart-grid"><figure><img src="{html.escape(raw_chart.name)}" alt="recent silver chart"></figure></div>'
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -542,7 +615,7 @@ def build_report(
       {silver_section}
     </section>
     <section class="section">
-      <h2>3. 최신 Raw 파일</h2>
+      <h2>3. 최신 Raw + 최근 3개월 Silver</h2>
       {raw_section}
     </section>
     <section class="section">

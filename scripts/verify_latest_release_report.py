@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -238,6 +238,7 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
         "invalid_rows": None,
         "integrity_ok": None,
         "max_date_str": None,
+        "reference_date": None,
         "days_behind": None,
         "is_fresh": None,
         "symbols_at_max_date": None,
@@ -268,6 +269,14 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
         report["min_date"] = str(row["min_date"]) if row["min_date"] else None
         report["max_date_str"] = str(row["max_date"]) if row["max_date"] else None
         report["max_date"] = report["max_date_str"]
+        # 커버리지 표에는 실제 데이터의 마지막 연도까지 포함
+        coverage_end_date = TARGET_END
+        if report["max_date_str"]:
+            try:
+                max_d = datetime.strptime(report["max_date_str"][:10], "%Y-%m-%d").date()
+                coverage_end_date = f"{max_d.year}-12-31"
+            except Exception:
+                coverage_end_date = TARGET_END
 
         dup_invalid = con.execute(
             """
@@ -286,8 +295,14 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
 
         if report["max_date_str"]:
             max_d = datetime.strptime(report["max_date_str"][:10], "%Y-%m-%d").date()
-            today = date.today()
-            report["days_behind"] = (today - max_d).days
+            # UTC 기준 최근 "업데이트 기대일"을 기준으로 판단 (서버/로컬 타임존 차이 방지)
+            today_utc = datetime.now(timezone.utc).date()
+            ref = today_utc - timedelta(days=1)
+            # 주말이면 직전 금요일로 당김
+            while ref.weekday() >= 5:
+                ref -= timedelta(days=1)
+            report["reference_date"] = ref.isoformat()
+            report["days_behind"] = (ref - max_d).days
             report["is_fresh"] = report["days_behind"] <= MAX_DAYS_BEHIND_FOR_FRESH
 
         at_max = con.execute(
@@ -313,7 +328,7 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
             GROUP BY year(date)
             ORDER BY year(date)
             """,
-            [p, TARGET_START, TARGET_END],
+            [p, TARGET_START, coverage_end_date],
         ).fetchdf()
         report["coverage_by_year"] = coverage
 
@@ -334,32 +349,62 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
             report["snapshot_symbols"] = int(uv.iloc[0]["snap"])
             report["missing_in_snapshot"] = int(uv.iloc[0]["missing"])
 
+            # Short/missing 판정은 validate_snapshot 로직과 동일하게 맞춘다.
             short_df = con.execute(
                 """
                 WITH first_seen AS (
-                    SELECT symbol, MIN(date) AS first_date FROM read_parquet(?) GROUP BY symbol
+                    SELECT symbol, MIN(date) AS first_date
+                    FROM read_parquet(?)
+                    GROUP BY symbol
                 ),
                 active AS (
-                    SELECT u.symbol,
-                           year(COALESCE(u.listing_date, f.first_date, CAST(? AS DATE))) AS eff_y
+                    SELECT
+                        u.symbol,
+                        u.name,
+                        u.market,
+                        u.listing_date,
+                        COALESCE(u.listing_date, f.first_date, CAST(? AS DATE)) AS effective_start_date,
+                        year(COALESCE(u.listing_date, f.first_date, CAST(? AS DATE))) AS effective_start_year
                     FROM meta.universe u
                     LEFT JOIN first_seen f ON u.symbol = f.symbol
                     WHERE u.is_active = TRUE
                 ),
-                years AS (SELECT generate_series AS y FROM generate_series(year(CAST(? AS DATE)), year(CAST(? AS DATE)))),
+                years AS (
+                    SELECT * FROM generate_series(year(CAST(? AS DATE)), year(CAST(? AS DATE)))
+                ),
                 counts AS (
-                    SELECT symbol, year(date) AS y, COUNT(*) AS cnt
+                    SELECT symbol, year(date) AS year, COUNT(*) AS cnt
                     FROM read_parquet(?)
                     WHERE date >= ? AND date <= ?
                     GROUP BY symbol, year(date)
                 )
-                SELECT y.y AS year
+                SELECT
+                    a.symbol,
+                    a.market,
+                    a.name,
+                    y.generate_series AS year,
+                    COALESCE(c.cnt, 0) AS row_count,
+                    a.listing_date,
+                    a.effective_start_date
                 FROM active a
                 CROSS JOIN years y
-                LEFT JOIN counts c ON a.symbol = c.symbol AND a.eff_y <= y.y AND y.y = c.y
-                WHERE y.y >= a.eff_y AND COALESCE(c.cnt, 0) < ?
+                LEFT JOIN counts c
+                  ON a.symbol = c.symbol
+                 AND y.generate_series = c.year
+                WHERE y.generate_series >= a.effective_start_year
+                  AND (
+                        (
+                            y.generate_series = a.effective_start_year
+                            AND a.effective_start_date > date_trunc('year', a.effective_start_date)
+                            AND COALESCE(c.cnt, 0) = 0
+                        )
+                        OR (
+                            y.generate_series > a.effective_start_year
+                            AND COALESCE(c.cnt, 0) < ?
+                        )
+                      )
                 """,
-                [p, TARGET_START, TARGET_START, TARGET_END, p, TARGET_START, TARGET_END, MIN_ROWS_PER_YEAR],
+                [p, TARGET_START, TARGET_START, TARGET_START, TARGET_END, p, TARGET_START, TARGET_END, MIN_ROWS_PER_YEAR],
             ).fetchdf()
             if not short_df.empty:
                 by_year = short_df.groupby("year").size().reset_index(name="short_count")
@@ -434,7 +479,12 @@ def format_report(
     days = report.get("days_behind")
     fresh = report.get("is_fresh")
     lines.append(f"- 스냅샷 **최대일**: {report['max_date_str']}")
-    lines.append(f"- 오늘 기준 **경과 일수**: {days}일" if days is not None else "- (날짜 없음)")
+    lines.append(
+        f"- 기준일(최근 영업일 추정): {report.get('reference_date')}"
+        if report.get("reference_date") is not None
+        else "- 기준일: (없음)"
+    )
+    lines.append(f"- 기준일 기준 **경과 일수**: {days}일" if days is not None else "- (날짜 없음)")
     if days is not None:
         lines.append(f"- **최신성** ({MAX_DAYS_BEHIND_FOR_FRESH}일 이내): **{'✅ 최신' if fresh else '⚠️ 다소 오래됨'}**")
     lines.append(f"- 최대일 기준 **수집 종목 수**: {report['symbols_at_max_date']:,} / {report['symbols']:,}")
@@ -488,12 +538,57 @@ def main() -> None:
         default=DEFAULT_REPO,
         help=f"Repo owner/name or GitHub URL (default: {DEFAULT_REPO}). Example: {DEFAULT_RELEASES_URL}",
     )
+    parser.add_argument(
+        "--file-path",
+        default=None,
+        help="Local parquet path. If set, skip GitHub download/API calls and verify this file instead.",
+    )
+    parser.add_argument(
+        "--release-tag",
+        default=None,
+        help="Release tag to display in report header (used with --file-path).",
+    )
     parser.add_argument("--tag", default=None, help="Use this release tag instead of latest (e.g. data-snapshot-20260317-1338)")
     parser.add_argument("--download-dir", type=Path, default=DOWNLOAD_DIR, help="Download directory")
     parser.add_argument("--report", type=Path, default=None, help="Save report to this file (default: print only)")
     args = parser.parse_args()
 
+    # Windows 기본 출력 인코딩(cp949)에서는 ✅/⚠️ 같은 문자가 깨질 수 있어 UTF-8로 고정
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
     print(f"GitHub token present: {bool(github_token())}")
+
+    if args.file_path:
+        parquet_path = Path(args.file_path).resolve()
+        if not parquet_path.exists():
+            raise FileNotFoundError(parquet_path)
+        tag = (args.release_tag or parquet_path.stem).strip()
+        release = {"tag_name": tag, "published_at": None}
+        sha_path = None
+
+        actual_sha256, expected_sha256, sha256_ok = verify_sha256_if_available(parquet_path, sha_path)
+        meta_exists = META_DB.exists()
+        report = run_validation(parquet_path, meta_exists)
+        report["tag"] = tag
+
+        text = format_report(
+            release=release,
+            parquet_path=parquet_path,
+            actual_sha256=actual_sha256,
+            report=report,
+            meta_exists=meta_exists,
+            expected_sha256=expected_sha256,
+            sha256_ok=sha256_ok,
+        )
+        print(text)
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(text, encoding="utf-8")
+            print(f"\nReport saved: {args.report}")
+        return
 
     try:
         repo = parse_repo_from_url(args.repo)
