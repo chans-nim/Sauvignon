@@ -2,7 +2,7 @@
 티커(종목코드)를 입력하면 실제 수집된 데이터를 바탕으로 종목 리포트를 생성한다.
 
 리포트 내용:
-- 유니버스/수집 상태/실버 저장 현황
+- 유니버스/수집 상태/릴리즈 스냅샷 저장 현황
 - 최신 raw JSON 의 output1 실제 값 + 의미
 - 최신 raw JSON 의 output2 필드 설명 + 최근 행 샘플 + 요약 통계
 - 차트가 유용한 값은 PNG 로 생성
@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
+import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -31,9 +33,15 @@ from src.storage import meta_store
 SILVER_DIR = settings.project_root / "data" / "lake" / "silver" / "ohlcv_daily"
 RAW_OHLCV_DIR = settings.project_root / "data" / "raw" / "ohlcv"
 TARGET_START = "2016-01-01"
-TARGET_END = "2025-12-31"
+# 연도별 커버리지/차트는 현재 연도까지 포함 (최신 데이터가 제대로 반영되도록)
+TARGET_END = f"{date.today().year}-12-31"
 MIN_ROWS_PER_YEAR = 200
 RECENT_MONTHS = 3
+
+MANIFEST_PATH = settings.project_root / "data_manifest.json"
+DOWNLOAD_DIR = settings.project_root / "data" / "downloads"
+SNAPSHOT_DIR = settings.project_root / "data" / "snapshot"
+DELTA_DIR = settings.project_root / "data" / "delta"
 
 
 OUTPUT1_FIELDS = {
@@ -183,6 +191,191 @@ def load_silver(symbol: str, market: str) -> pd.DataFrame:
     return df.sort_values("date").reset_index(drop=True)
 
 
+def parse_repo_from_url(repo_or_url: str) -> str:
+    s = repo_or_url.strip()
+    if "github.com" in s:
+        parts = s.rstrip("/").replace("https://", "").replace("http://", "").split("/")
+        if "github.com" in parts:
+            i = parts.index("github.com")
+            if i + 2 <= len(parts):
+                return f"{parts[i + 1]}/{parts[i + 2]}"
+    return s
+
+
+def load_manifest_tag(path: Path = MANIFEST_PATH) -> str | None:
+    if not path.exists():
+        return None
+    m = json.loads(path.read_text(encoding="utf-8"))
+    latest = m.get("latest_current")
+    if isinstance(latest, dict) and latest.get("tag"):
+        return str(latest["tag"])
+    if isinstance(latest, str) and latest:
+        return latest
+    return None
+
+
+def gh_latest_tag(repo: str) -> str:
+    # 최신 1개 태그만
+    out = subprocess.check_output(
+        ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
+        text=True,
+    ).strip()
+    if not out:
+        raise SystemExit(f"No releases found in {repo}")
+    return out
+
+
+def resolve_local_release_parquet(tag: str) -> Path | None:
+    if tag.startswith("data-delta-"):
+        base = DELTA_DIR
+    elif tag.startswith("data-snapshot-") or tag.startswith("data-full-"):
+        base = SNAPSHOT_DIR
+    else:
+        return None
+    p = base / f"{tag}.parquet"
+    return p if p.exists() else None
+
+
+def download_release_parquet(repo: str, tag: str, out_dir: Path) -> Path:
+    repo = parse_repo_from_url(repo)
+    release_dir = out_dir / tag
+    release_dir.mkdir(parents=True, exist_ok=True)
+
+    # 이전 다운로드 찌꺼기 방지(동일 tag이면 파일명이 동일하므로 기본적으로 유효하지만, 안전하게 정리)
+    for old in release_dir.glob("*.parquet"):
+        old.unlink(missing_ok=True)
+
+    try:
+        gh_pat = os.getenv("GH_PAT_SAUVIGNON") or ""
+        if not gh_pat:
+            raise SystemExit("Missing GH_PAT_SAUVIGNON for gh release download")
+        gh_env = os.environ.copy()
+        gh_env["GH_TOKEN"] = gh_pat
+        subprocess.run(
+            ["gh", "release", "download", tag, "--repo", repo, "-D", str(release_dir), "-p", "*.parquet"],
+            check=True,
+            env=gh_env,
+        )
+    except FileNotFoundError:
+        # Local 환경에 gh CLI가 없는 경우를 위해 HTTP 다운로드로 폴백
+        return download_release_parquet_http(repo, tag, release_dir)
+
+    parquets = sorted(release_dir.glob("*.parquet"))
+    if not parquets:
+        raise SystemExit(f"No parquet asset downloaded for {repo}@{tag}")
+
+    expected = release_dir / f"{tag}.parquet"
+    if expected.exists():
+        return expected
+    # fallback: 하나만 있으면 그걸, 여러 개면 정렬 첫 파일
+    return parquets[0]
+
+
+def download_release_parquet_http(repo: str, tag: str, release_dir: Path) -> Path:
+    """
+    gh CLI 없이도 GitHub API + HTTP로 릴리즈 parquet을 직접 다운로드한다.
+    """
+    import requests
+
+    # 요청 사항: GitHub 토큰은 GH_PAT_SAUVIGNON 우선 사용
+    token = os.getenv("GH_PAT_SAUVIGNON") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN") or ""
+
+    headers = {
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Accept": "application/vnd.github+json",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    try:
+        payload = requests.get(api_url, headers=headers, timeout=30).json()
+    except Exception as e:
+        raise SystemExit(f"GitHub API request failed. repo={repo} tag={tag}. err={e}") from e
+
+    assets = payload.get("assets") or []
+    parquet_assets = [a for a in assets if str(a.get("name") or "").endswith(".parquet")]
+    if not parquet_assets:
+        asset_names = [a.get("name") for a in assets]
+        payload_msg = payload.get("message") if isinstance(payload, dict) else None
+        raise SystemExit(
+            f"No parquet assets found in {repo}@{tag}. "
+            f"payload_message={payload_msg}. assets={asset_names}"
+        )
+
+    expected_name = f"{tag}.parquet"
+    chosen = None
+    for a in parquet_assets:
+        if a.get("name") == expected_name:
+            chosen = a
+            break
+    chosen = chosen or parquet_assets[0]
+
+    asset_id = chosen.get("id")
+    if not asset_id:
+        raise SystemExit(f"Missing asset id for {chosen.get('name')} in {repo}@{tag}")
+
+    dst = release_dir / str(chosen.get("name") or f"{tag}.parquet")
+    if dst.exists():
+        return dst
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    asset_url = f"https://api.github.com/repos/{repo}/releases/assets/{asset_id}"
+    binary_headers = {
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Accept": "application/octet-stream",
+    }
+    if token:
+        binary_headers["Authorization"] = f"Bearer {token}"
+
+    with requests.get(asset_url, headers=binary_headers, stream=True, timeout=300) as r:
+        r.raise_for_status()
+        with open(dst, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    f.write(chunk)
+
+    return dst
+
+
+def load_release_series(symbol: str, market: str, *, repo: str, tag: str | None, download_dir: Path) -> pd.DataFrame:
+    """
+    GitHub Release에 올라간 스냅샷 parquet을 기준으로, 해당 종목(symbol)만 OHLCV 시계열을 로드한다.
+    """
+    import duckdb
+
+    repo = parse_repo_from_url(repo)
+    resolved_tag = tag or load_manifest_tag() or gh_latest_tag(repo)
+    local_parquet = resolve_local_release_parquet(resolved_tag)
+    downloaded = False
+    if local_parquet is None:
+        local_parquet = download_release_parquet(repo, resolved_tag, download_dir)
+        downloaded = True
+    print(f"[ticker_report] release tag={resolved_tag} parquet={local_parquet} ({'downloaded' if downloaded else 'cached'})")
+
+    con = duckdb.connect()
+    try:
+        df = con.execute(
+            """
+            SELECT
+              date, open, high, low, close, volume, value
+            FROM read_parquet(?)
+            WHERE symbol = ? AND market = ?
+            ORDER BY date
+            """,
+            [local_parquet.as_posix(), symbol, market],
+        ).fetchdf()
+    finally:
+        con.close()
+
+    if df.empty:
+        return df
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    return df.sort_values("date").reset_index(drop=True)
+
+
 def latest_raw_file(symbol: str) -> Path | None:
     candidates = []
     if not RAW_OHLCV_DIR.exists():
@@ -318,8 +511,8 @@ def plot_silver_overview(df: pd.DataFrame, symbol: str, out_path: Path) -> None:
 
 def plot_recent_silver(df: pd.DataFrame, symbol: str, out_path: Path, *, months: int = RECENT_MONTHS) -> None:
     """
-    최근 N개월 Silver(릴리즈/증분 반영) 기준 차트.
-    raw(output2) 대신 Silver 기반으로 최신 구간을 확인할 수 있게 해줌.
+    최근 N개월 Release snapshot 기준 차트.
+    raw(output2) 대신 Release snapshot 기반으로 최신 구간을 확인할 수 있게 해줌.
     """
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
@@ -406,7 +599,7 @@ def build_report(
     output2_df = normalize_output2_rows(output2_rows)
     output2_recent_df = load_output2_recent_six_months(symbol)
 
-    # 최근 구간은 raw이 아니라 Silver(릴리즈/증분 반영) 기준으로 표시
+    # 최근 구간은 raw이 아니라 Release snapshot 기준으로 표시
     recent_silver_df = pd.DataFrame()
     if not silver_df.empty:
         latest_date = silver_df["date"].max()
@@ -468,14 +661,14 @@ def build_report(
         ],
     )
 
-    silver_section = '<p class="empty">실버 데이터가 없습니다.</p>'
+    silver_section = '<p class="empty">릴리즈 스냅샷 데이터가 없습니다.</p>'
     if not silver_df.empty:
         min_date = silver_df["date"].min().date()
         max_date = silver_df["date"].max().date()
         silver_stats = render_html_table(
             ["항목", "값", "의미"],
             [
-                ["rows_total", fmt_num(len(silver_df)), "실버에 저장된 전체 일봉 행 수"],
+                ["rows_total", fmt_num(len(silver_df)), "릴리즈 스냅샷에 저장된 전체 일봉 행 수"],
                 ["date_range", f"{min_date} ~ {max_date}", "실제 저장 구간"],
                 ["rows_in_target", fmt_num(coverage["total"]), f"{TARGET_START} ~ {TARGET_END} 구간 행 수"],
                 ["missing_years", ", ".join(map(str, coverage["missing"])) or "-", "해당 연도 데이터가 전혀 없는 경우"],
@@ -494,7 +687,7 @@ def build_report(
             f"{yearly_table}"
         )
 
-    recent_silver_stats_html = '<p class="empty">최근 Silver 요약 통계 없음</p>'
+    recent_silver_stats_html = '<p class="empty">최근 Release snapshot 요약 통계 없음</p>'
     if not recent_silver_df.empty:
         recent_silver_stats_html = render_html_table(
             ["항목", "값", "의미"],
@@ -502,7 +695,7 @@ def build_report(
                 [
                     "window_range",
                     f"{recent_silver_df['date'].min().date()} ~ {recent_silver_df['date'].max().date()}",
-                    f"최근 {RECENT_MONTHS}개월 Silver 구간",
+                    f"최근 {RECENT_MONTHS}개월 Release snapshot 구간",
                 ],
                 ["rows", fmt_num(len(recent_silver_df)), f"최근 {RECENT_MONTHS}개월 구간 행 수"],
                 ["close_min", fmt_num(recent_silver_df["close"].min()), "종가 최저값"],
@@ -513,14 +706,14 @@ def build_report(
             ],
         )
 
-    silver_recent_field_table = '<p class="empty">최근 Silver 샘플 값 없음</p>'
+    silver_recent_field_table = '<p class="empty">최근 Release snapshot 샘플 값 없음</p>'
     if not recent_silver_df.empty:
         last = recent_silver_df.iloc[-1]
         last_date = last["date"].date() if hasattr(last["date"], "date") else last["date"]
         silver_recent_field_table = render_html_table(
             ["필드코드", "표시명", "최근 샘플값", "의미"],
             [
-                ["date", "영업일자", str(last_date), f"최근 {RECENT_MONTHS}개월 Silver 마지막 거래일"],
+                ["date", "영업일자", str(last_date), f"최근 {RECENT_MONTHS}개월 Release snapshot 마지막 거래일"],
                 ["open", "시가", fmt_num(last.get("open")), "해당 거래일 시가"],
                 ["high", "고가", fmt_num(last.get("high")), "해당 거래일 고가"],
                 ["low", "저가", fmt_num(last.get("low")), "해당 거래일 저가"],
@@ -532,11 +725,11 @@ def build_report(
     recent_silver_block_html = recent_silver_stats_html
     if not recent_silver_df.empty:
         recent_silver_block_html = (
-            f'<h3>3-2. 최근 {RECENT_MONTHS}개월 Silver 샘플(마지막 거래일)</h3>'
+            f'<h3>3-2. 최근 {RECENT_MONTHS}개월 Release snapshot 샘플(마지막 거래일)</h3>'
             + silver_recent_field_table
-            + f'<h3>3-3. 최근 {RECENT_MONTHS}개월 Silver 샘플</h3>'
+            + f'<h3>3-3. 최근 {RECENT_MONTHS}개월 Release snapshot 샘플</h3>'
             + recent_rows_html
-            + f'<h3>3-4. 최근 {RECENT_MONTHS}개월 Silver 요약 통계</h3>'
+            + f'<h3>3-4. 최근 {RECENT_MONTHS}개월 Release snapshot 요약 통계</h3>'
             + recent_silver_stats_html
             + f'<div class="chart-grid"><figure><img src="{html.escape(raw_chart.name)}" alt="recent silver chart"></figure></div>'
         )
@@ -556,13 +749,13 @@ def build_report(
         raw_section += '<h3>3-1. output1 실제값 정리</h3>'
         raw_section += '<p>output1은 조회 시점의 종목 스냅샷 값입니다. 가격, 호가, 거래량, 밸류에이션 지표를 담습니다.</p>'
         raw_section += output1_table
-        raw_section += f'<h3>3-2. 최근 {RECENT_MONTHS}개월 Silver 샘플(마지막 거래일)</h3>'
-        raw_section += '<p>본 리포트에서 “최근 구간”으로 표시하는 가격/거래량/거래대금 값은 raw(output2)가 아니라 Silver(릴리즈/증분 반영) 기준입니다.</p>'
+        raw_section += f'<h3>3-2. 최근 {RECENT_MONTHS}개월 Release snapshot 샘플(마지막 거래일)</h3>'
+        raw_section += '<p>본 리포트에서 “최근 구간”으로 표시하는 가격/거래량/거래대금 값은 raw(output2)가 아니라 Release snapshot 기준입니다.</p>'
         raw_section += silver_recent_field_table
         if not recent_silver_df.empty:
-            raw_section += f'<h3>3-3. 최근 {RECENT_MONTHS}개월 Silver 샘플</h3>'
+            raw_section += f'<h3>3-3. 최근 {RECENT_MONTHS}개월 Release snapshot 샘플</h3>'
             raw_section += recent_rows_html
-            raw_section += f'<h3>3-4. 최근 {RECENT_MONTHS}개월 Silver 요약 통계</h3>'
+            raw_section += f'<h3>3-4. 최근 {RECENT_MONTHS}개월 Release snapshot 요약 통계</h3>'
             raw_section += recent_silver_stats_html
             raw_section += f'<div class="chart-grid"><figure><img src="{html.escape(raw_chart.name)}" alt="recent silver chart"></figure></div>'
 
@@ -611,11 +804,11 @@ def build_report(
       {summary_table}
     </section>
     <section class="section">
-      <h2>2. Silver 저장 현황</h2>
+      <h2>2. 릴리즈 스냅샷 저장 현황</h2>
       {silver_section}
     </section>
     <section class="section">
-      <h2>3. 최신 Raw + 최근 3개월 Silver</h2>
+      <h2>3. 최신 Raw + 최근 3개월 Release snapshot</h2>
       {raw_section}
     </section>
     <section class="section">
@@ -635,6 +828,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="실제 내부값 기반 종목 리포트 생성")
     parser.add_argument("--symbol", required=True, help="종목코드 (예: 005930)")
     parser.add_argument("--out-dir", default="reports", help="리포트 출력 디렉터리")
+    parser.add_argument("--mode", choices=("release", "silver"), default="release", help="OHLCV 시계열 데이터 소스")
+    parser.add_argument("--release-repo", default="chans-nim/Sauvignon", help="Release repo (owner/name or URL)")
+    parser.add_argument("--release-tag", default=None, help="Release tag (default: data_manifest.latest_current or gh latest)")
+    parser.add_argument("--download-dir", default=DOWNLOAD_DIR.as_posix(), help="Release parquet 다운로드 디렉터리")
     args = parser.parse_args()
 
     symbol = args.symbol.strip()
@@ -647,7 +844,16 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     state = get_collect_state(symbol)
-    silver_df = load_silver(symbol, str(universe["market"]))
+    if args.mode == "silver":
+        silver_df = load_silver(symbol, str(universe["market"]))
+    else:
+        silver_df = load_release_series(
+            symbol,
+            str(universe["market"]),
+            repo=args.release_repo,
+            tag=args.release_tag,
+            download_dir=Path(args.download_dir),
+        )
     raw_path, raw_data = load_latest_raw(symbol)
     report = build_report(symbol, universe, state, silver_df, raw_path, raw_data, out_dir)
 
@@ -656,6 +862,11 @@ def main() -> None:
 
     print(f"Report written: {report_path}")
     print(f"Output directory: {out_dir}")
+    if not silver_df.empty:
+        max_d = silver_df["date"].max()
+        max_date_str = max_d.date() if hasattr(max_d, "date") else str(max_d)[:10]
+        source_name = "release snapshot" if args.mode == "release" else "local silver"
+        print(f"{source_name} 최대일: {max_date_str}")
 
 
 if __name__ == "__main__":
