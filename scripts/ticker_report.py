@@ -214,6 +214,44 @@ def load_manifest_tag(path: Path = MANIFEST_PATH) -> str | None:
     return None
 
 
+def manifest_latest_current_entry(path: Path = MANIFEST_PATH) -> dict | None:
+    """data_manifest.json 의 latest_current 객체 (tag, created_at, max_date 등)."""
+    if not path.exists():
+        return None
+    m = json.loads(path.read_text(encoding="utf-8"))
+    lc = m.get("latest_current")
+    return lc if isinstance(lc, dict) else None
+
+
+def query_symbol_last_day_max_ingested(parquet_path: Path, symbol: str, market: str) -> str | None:
+    """해당 종목의 최종 거래일(date=max) 행들 중 ingested_at 최대값 (컬럼 없으면 None)."""
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        row = con.execute(
+            """
+            WITH t AS (
+              SELECT date, ingested_at
+              FROM read_parquet(?)
+              WHERE symbol = ? AND market = ?
+            )
+            SELECT MAX(ingested_at)::VARCHAR AS mx
+            FROM t
+            WHERE date = (SELECT MAX(date) FROM t)
+            """,
+            [parquet_path.as_posix(), symbol, market],
+        ).fetchone()
+    except Exception:
+        return None
+    finally:
+        con.close()
+    if not row or row[0] is None:
+        return None
+    s = str(row[0]).strip()
+    return s or None
+
+
 def gh_latest_tag(repo: str) -> str:
     # 최신 1개 태그만
     out = subprocess.check_output(
@@ -339,14 +377,20 @@ def download_release_parquet_http(repo: str, tag: str, release_dir: Path) -> Pat
     return dst
 
 
-def load_release_series(symbol: str, market: str, *, repo: str, tag: str | None, download_dir: Path) -> pd.DataFrame:
+def load_release_series(
+    symbol: str, market: str, *, repo: str, tag: str | None, download_dir: Path
+) -> tuple[pd.DataFrame, dict]:
     """
-    GitHub Release에 올라간 스냅샷 parquet을 기준으로, 해당 종목(symbol)만 OHLCV 시계열을 로드한다.
+    GitHub Release 스냅샷 parquet에서 해당 종목 OHLCV 시계열 + 수집·릴리즈 메타를 반환한다.
     """
     import duckdb
 
     repo = parse_repo_from_url(repo)
     resolved_tag = tag or load_manifest_tag() or gh_latest_tag(repo)
+    m_entry = manifest_latest_current_entry()
+    manifest_created_at = (m_entry or {}).get("created_at")
+    manifest_max_date = (m_entry or {}).get("max_date")
+
     local_parquet = resolve_local_release_parquet(resolved_tag)
     downloaded = False
     if local_parquet is None:
@@ -369,11 +413,20 @@ def load_release_series(symbol: str, market: str, *, repo: str, tag: str | None,
     finally:
         con.close()
 
+    last_ingested = query_symbol_last_day_max_ingested(local_parquet, symbol, market)
+    meta = {
+        "release_tag": resolved_tag,
+        "parquet_path": str(local_parquet),
+        "manifest_created_at": str(manifest_created_at) if manifest_created_at else None,
+        "manifest_max_date": str(manifest_max_date) if manifest_max_date else None,
+        "symbol_last_day_max_ingested_at": last_ingested,
+    }
+
     if df.empty:
-        return df
+        return df, meta
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
-    return df.sort_values("date").reset_index(drop=True)
+    return df.sort_values("date").reset_index(drop=True), meta
 
 
 def latest_raw_file(symbol: str) -> Path | None:
@@ -591,6 +644,8 @@ def build_report(
     raw_path: Path | None,
     raw_data: dict | None,
     out_dir: Path,
+    *,
+    release_source_meta: dict | None = None,
 ) -> str:
     report_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     coverage = coverage_summary(silver_df)
@@ -644,6 +699,19 @@ def build_report(
                 for _, r in tail.iterrows()
             ],
         )
+    release_hero_lines = ""
+    if release_source_meta:
+        rt = release_source_meta.get("release_tag") or "-"
+        mc = release_source_meta.get("manifest_created_at") or "-"
+        mm = release_source_meta.get("manifest_max_date") or "-"
+        li = release_source_meta.get("symbol_last_day_max_ingested_at") or "-"
+        release_hero_lines = (
+            f'<div>릴리즈 스냅샷 태그: {html.escape(str(rt))}</div>'
+            f'<div>manifest 생성 시각(UTC): {html.escape(str(mc))}</div>'
+            f'<div>manifest 최대 거래일: {html.escape(str(mm))}</div>'
+            f'<div>본 종목 최종일 ingested_at 최대: {html.escape(str(li))}</div>'
+        )
+
     summary_table = render_html_table(
         ["항목", "값", "의미"],
         [
@@ -660,6 +728,28 @@ def build_report(
             ["last_error", "-" if not state else (state.get("last_error") or "-"), "최근 실패 오류 메시지"],
         ],
     )
+
+    release_meta_block = ""
+    if release_source_meta:
+        release_meta_block = (
+            "<h3>2-0. 릴리즈·수집 메타</h3>"
+            "<p>동일 거래일(date)은 이후 수집분이 이전분을 덮어씁니다. "
+            "KST 20:00 이전에 수집된 당일 봉은 장 마감 후 재수집으로 갱신될 수 있습니다.</p>"
+            + render_html_table(
+                ["항목", "값", "의미"],
+                [
+                    ["release_tag", str(release_source_meta.get("release_tag") or "-"), "사용한 GitHub Release 태그"],
+                    ["manifest_created_at", str(release_source_meta.get("manifest_created_at") or "-"), "data_manifest 기준 스냅샷 반영 시각(UTC)"],
+                    ["manifest_max_date", str(release_source_meta.get("manifest_max_date") or "-"), "스냅샷에 포함된 최대 거래일"],
+                    [
+                        "symbol_last_day_max_ingested_at",
+                        str(release_source_meta.get("symbol_last_day_max_ingested_at") or "-"),
+                        "본 종목 최종 거래일 행의 ingested_at 최대(병합 시각 추정)",
+                    ],
+                    ["parquet_path", str(release_source_meta.get("parquet_path") or "-"), "읽은 스냅샷 parquet 경로"],
+                ],
+            )
+        )
 
     silver_section = '<p class="empty">릴리즈 스냅샷 데이터가 없습니다.</p>'
     if not silver_df.empty:
@@ -681,11 +771,14 @@ def build_report(
         ]
         yearly_table = render_html_table(["연도", "행 수", "판정"], year_rows)
         silver_section = (
+            f"{release_meta_block}"
             f"{silver_stats}"
             f'<div class="chart-grid"><figure><img src="{html.escape(silver_chart.name)}" alt="silver overview"></figure>'
             f'<figure><img src="{html.escape(year_chart.name)}" alt="yearly rows"></figure></div>'
             f"{yearly_table}"
         )
+    elif release_meta_block:
+        silver_section = release_meta_block + silver_section
 
     recent_silver_stats_html = '<p class="empty">최근 Release snapshot 요약 통계 없음</p>'
     if not recent_silver_df.empty:
@@ -797,6 +890,7 @@ def build_report(
         <div>시장: {html.escape(str(universe.get('market', '-')))}</div>
         <div>자산유형: {html.escape(str(universe.get('asset_type', '-')))}</div>
         <div>상장일: {html.escape(str(universe.get('listing_date', '-')))}</div>
+        {release_hero_lines}
       </div>
     </div>
     <section class="section">
@@ -817,6 +911,8 @@ def build_report(
         <li>가격/거래량/거래대금처럼 시간 흐름을 보는 값은 차트로 표시했습니다.</li>
         <li>메타데이터, 상태값, 스냅샷 값은 표 형태로 정리했습니다.</li>
         <li>output1은 조회 시점 단일 스냅샷이라 표가 적합하고, output2는 시계열이므로 차트와 최근 행 샘플을 함께 보여줍니다.</li>
+        <li>Release 스냅샷은 (symbol, date) 단위로 병합되며, 같은 날짜는 <strong>나중에 수집된 행(ingested_at이 큰 값)</strong>이 우선합니다.</li>
+        <li>운영 스케줄: KST 16:30경 수집은 장중·마감 전 값일 수 있고, KST 20:15경(대체 20:00 종료 이후) 재수집으로 당일 봉을 갱신합니다.</li>
       </ul>
     </section>
   </div>
@@ -844,10 +940,11 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     state = get_collect_state(symbol)
+    release_meta: dict | None = None
     if args.mode == "silver":
         silver_df = load_silver(symbol, str(universe["market"]))
     else:
-        silver_df = load_release_series(
+        silver_df, release_meta = load_release_series(
             symbol,
             str(universe["market"]),
             repo=args.release_repo,
@@ -855,7 +952,16 @@ def main() -> None:
             download_dir=Path(args.download_dir),
         )
     raw_path, raw_data = load_latest_raw(symbol)
-    report = build_report(symbol, universe, state, silver_df, raw_path, raw_data, out_dir)
+    report = build_report(
+        symbol,
+        universe,
+        state,
+        silver_df,
+        raw_path,
+        raw_data,
+        out_dir,
+        release_source_meta=release_meta,
+    )
 
     report_path = out_dir / f"{symbol}_report.html"
     report_path.write_text(report, encoding="utf-8")
@@ -867,6 +973,10 @@ def main() -> None:
         max_date_str = max_d.date() if hasattr(max_d, "date") else str(max_d)[:10]
         source_name = "release snapshot" if args.mode == "release" else "local silver"
         print(f"{source_name} 최대일: {max_date_str}")
+        if release_meta and release_meta.get("manifest_created_at"):
+            print(f"manifest created_at(UTC): {release_meta['manifest_created_at']}")
+        if release_meta and release_meta.get("symbol_last_day_max_ingested_at"):
+            print(f"종목 최종일 max ingested_at: {release_meta['symbol_last_day_max_ingested_at']}")
 
 
 if __name__ == "__main__":

@@ -250,6 +250,8 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
         "short_symbol_years_by_year": None,
         "missing_2016": None,
         "missing_2025": None,
+        "max_ingested_at_snapshot": None,
+        "max_ingested_at_on_max_date": None,
     }
     try:
         summary = con.execute(
@@ -314,6 +316,28 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
             [p, p],
         ).fetchdf()
         report["symbols_at_max_date"] = int(at_max.iloc[0]["cnt"])
+
+        # 스냅샷 parquet 내 ingested_at(있을 때만) — 병합·수집 시각 추정용
+        try:
+            ing_all = con.execute(
+                "SELECT MAX(ingested_at)::VARCHAR AS mx FROM read_parquet(?)",
+                [p],
+            ).fetchone()
+            report["max_ingested_at_snapshot"] = str(ing_all[0]) if ing_all and ing_all[0] else None
+        except Exception:
+            report["max_ingested_at_snapshot"] = None
+        try:
+            ing_md = con.execute(
+                """
+                SELECT MAX(ingested_at)::VARCHAR AS mx
+                FROM read_parquet(?)
+                WHERE date = (SELECT MAX(date) FROM read_parquet(?))
+                """,
+                [p, p],
+            ).fetchone()
+            report["max_ingested_at_on_max_date"] = str(ing_md[0]) if ing_md and ing_md[0] else None
+        except Exception:
+            report["max_ingested_at_on_max_date"] = None
 
         coverage = con.execute(
             """
@@ -466,6 +490,21 @@ def format_report(
     lines.append(f"| 종목 수 | {report['symbols']:,} |")
     lines.append(f"| 최소일 | {report['min_date']} |")
     lines.append(f"| 최대일 | {report['max_date_str']} |")
+    lines.append("")
+    lines.append("## 1-1. 수집·스냅샷 시각 메타")
+    lines.append("")
+    lines.append(
+        "- 동일 **(symbol, date)** 는 스냅샷 빌드 시 **ingested_at이 더 나중인 행**이 최종값으로 남습니다."
+    )
+    lines.append(
+        "- GitHub Actions: **KST 16:30(UTC 07:30)** 수집은 장중·마감 전 값일 수 있고, "
+        "**KST 20:15(UTC 11:15)** 재수집으로 대체 장마감(20:00 KST) 이후 당일 봉을 반영합니다."
+    )
+    lines.append("")
+    lines.append("| 항목 | 값 |")
+    lines.append("|------|-----|")
+    lines.append(f"| parquet 내 MAX(ingested_at) | {report.get('max_ingested_at_snapshot') or '(없음/미지원)'} |")
+    lines.append(f"| 최대 거래일 행들의 MAX(ingested_at) | {report.get('max_ingested_at_on_max_date') or '(없음/미지원)'} |")
     lines.append("")
     lines.append("## 2. 무결성")
     lines.append("")

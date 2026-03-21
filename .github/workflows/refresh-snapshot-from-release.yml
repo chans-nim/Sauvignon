@@ -11,6 +11,10 @@
 # - Create release / Upload assets: GH 권한·용량 한도 시 실패.
 # - Update data_manifest.json 후 push: 충돌 시 실패 (동시 수정 없으면 정상).
 # - Release lock (if: always()): 실패해도 다음 run에서 lock 만료 후 진행 가능.
+#
+# 스케줄(둘 다 월~금):
+# - UTC 07:30 = KST 16:30 : 장중/마감 전에도 수집 가능. 당일 봉은 이후 재수집 시 갱신됨.
+# - UTC 11:15 = KST 20:15 : 대체 장마감(20:00 KST) 이후 당일 최종 반영을 목표로 한 재수집.
 name: Refresh Snapshot from GitHub Release
 
 on:
@@ -27,8 +31,8 @@ on:
         description: "Optional: new snapshot tag to publish (default: auto data-snapshot-YYYYMMDD-HHMM)"
         required: false
   schedule:
-    # KST 기준 장 마감 후 여유: UTC 07:30 = KST 16:30
-    - cron: "30 7 * * 1-5"
+    - cron: "30 1 * * 1-5" # KST 16:30
+    - cron: "15 11 * * 1-5" # KST 20:15 (20:00 대체 종료 이후)
 
 permissions:
   contents: write
