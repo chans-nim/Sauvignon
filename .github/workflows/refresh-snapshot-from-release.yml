@@ -5,6 +5,7 @@
 # - Sync from Release: GH_TOKEN/권한, release에 *.parquet 없음, sha256 불일치 시 실패.
 # - Refresh universe: KOSPI/KOSDAQ master 다운로드 실패 시 실패 (최대 3회 재시도).
 # - Incremental collect: KIS 시크릿 없음/만료/한도 초과 시 일부·전량 실패.
+# - Repair zero-volume: 당일 MAX(date)에서 volume=0·close>0 종목만 KIS 재수집(기존 청크 무시).
 #   전량 실패 시 run_daily_collect가 exit(1)하여 스냅샷 덮어쓰기 방지.
 # - Build snapshot: silver 없음/스키마 오류 시 실패.
 # - Validate: 품질 기준 미달 시 실패 (배포 전 차단).
@@ -119,6 +120,17 @@ jobs:
           KIS_ACC_NUM_SUB: ${{ secrets.KIS_ACC_NUM_SUB }}
         run: |
           python -m scripts.run_daily_collect
+
+      - name: Repair zero-volume on latest date (silver, re-fetch)
+        env:
+          TZ: Asia/Seoul
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          KIS_USER_ID: ${{ secrets.KIS_USER_ID }}
+          KIS_ACC_NUM_MAIN: ${{ secrets.KIS_ACC_NUM_MAIN }}
+          KIS_ACC_NUM_SUB: ${{ secrets.KIS_ACC_NUM_SUB }}
+        run: |
+          python -m scripts.repair_zero_volume_day
 
       - name: Build snapshot
         id: build_snapshot

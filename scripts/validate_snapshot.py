@@ -80,6 +80,41 @@ def main() -> None:
         )
         print()
 
+        print("[zero_volume_on_max_date]")
+        print(
+            con.execute(
+                """
+                WITH mx AS (SELECT MAX(date) AS d FROM read_parquet(?)),
+                z AS (
+                  SELECT s.symbol, s.market, s.date, s.close, s.volume
+                  FROM read_parquet(?) AS s, mx
+                  WHERE s.date = mx.d
+                )
+                SELECT
+                  (SELECT d::VARCHAR FROM mx) AS max_date,
+                  (SELECT COUNT(*) FROM z WHERE COALESCE(volume, 0) = 0) AS rows_volume_zero,
+                  (SELECT COUNT(*) FROM z WHERE COALESCE(volume, 0) = 0 AND COALESCE(close, 0) > 0) AS rows_vol0_close_pos,
+                  (SELECT COUNT(*) FROM z) AS rows_on_max_date
+                """,
+                [snapshot, snapshot],
+            ).fetchdf().to_string(index=False)
+        )
+        print(
+            con.execute(
+                """
+                WITH mx AS (SELECT MAX(date) AS d FROM read_parquet(?))
+                SELECT s.symbol, s.market, s.close, s.volume
+                FROM read_parquet(?) AS s, mx
+                WHERE s.date = mx.d AND COALESCE(s.volume, 0) = 0 AND COALESCE(s.close, 0) > 0
+                ORDER BY s.symbol
+                LIMIT 20
+                """,
+                [snapshot, snapshot],
+            ).fetchdf().to_string(index=False)
+        )
+        print("(sample up to 20: volume=0 and close>0 on max date; run scripts.repair_zero_volume_day on silver to re-fetch)")
+        print()
+
         print("[coverage_by_year]")
         print(
             con.execute(

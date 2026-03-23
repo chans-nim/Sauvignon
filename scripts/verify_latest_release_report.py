@@ -26,6 +26,10 @@ TARGET_START = "2016-01-01"
 TARGET_END = "2025-12-31"
 MIN_ROWS_PER_YEAR = 200
 MAX_DAYS_BEHIND_FOR_FRESH = 7
+LOW_VOL_RATIO = 0.1
+LOW_VOL_LOOKBACK_DAYS = 30
+LOW_VOL_MIN_BASELINE = 1000
+LOW_VOL_MIN_HISTORY_POINTS = 10
 
 
 def parse_repo_from_url(repo_or_url: str) -> str:
@@ -252,6 +256,14 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
         "missing_2025": None,
         "max_ingested_at_snapshot": None,
         "max_ingested_at_on_max_date": None,
+        "zero_volume_on_max_date": None,
+        "zero_vol_close_pos_on_max_date": None,
+        "rows_on_max_date": None,
+        "low_volume_outliers_on_max_date": None,
+        "low_volume_ratio_threshold": LOW_VOL_RATIO,
+        "low_volume_lookback_days": LOW_VOL_LOOKBACK_DAYS,
+        "low_volume_min_baseline": LOW_VOL_MIN_BASELINE,
+        "low_volume_min_history_points": LOW_VOL_MIN_HISTORY_POINTS,
     }
     try:
         summary = con.execute(
@@ -338,6 +350,75 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
             report["max_ingested_at_on_max_date"] = str(ing_md[0]) if ing_md and ing_md[0] else None
         except Exception:
             report["max_ingested_at_on_max_date"] = None
+
+        try:
+            zv = con.execute(
+                """
+                WITH mx AS (SELECT MAX(date) AS d FROM read_parquet(?)),
+                z AS (
+                  SELECT s.volume, s.close
+                  FROM read_parquet(?) AS s, mx
+                  WHERE s.date = mx.d
+                )
+                SELECT
+                  (SELECT COUNT(*) FROM z WHERE COALESCE(volume, 0) = 0) AS zv,
+                  (SELECT COUNT(*) FROM z WHERE COALESCE(volume, 0) = 0 AND COALESCE(close, 0) > 0) AS zvcp,
+                  (SELECT COUNT(*) FROM z) AS total
+                """,
+                [p, p],
+            ).fetchdf()
+            report["zero_volume_on_max_date"] = int(zv.iloc[0]["zv"])
+            report["zero_vol_close_pos_on_max_date"] = int(zv.iloc[0]["zvcp"])
+            report["rows_on_max_date"] = int(zv.iloc[0]["total"])
+        except Exception:
+            report["zero_volume_on_max_date"] = None
+            report["zero_vol_close_pos_on_max_date"] = None
+            report["rows_on_max_date"] = None
+
+        try:
+            lv = con.execute(
+                """
+                WITH mx AS (
+                  SELECT MAX(date) AS d FROM read_parquet(?)
+                ),
+                today AS (
+                  SELECT s.symbol, s.volume, s.close
+                  FROM read_parquet(?) AS s, mx
+                  WHERE s.date = mx.d
+                ),
+                hist AS (
+                  SELECT
+                    s.symbol,
+                    median(CAST(s.volume AS DOUBLE)) AS baseline_volume,
+                    COUNT(*) AS history_points
+                  FROM read_parquet(?) AS s, mx
+                  WHERE CAST(s.date AS DATE) < CAST(mx.d AS DATE)
+                    AND CAST(s.date AS DATE) >= CAST(mx.d AS DATE) - (?::INTEGER * INTERVAL '1 day')
+                    AND COALESCE(s.volume, 0) > 0
+                  GROUP BY s.symbol
+                )
+                SELECT COUNT(*) AS cnt
+                FROM today t
+                JOIN hist h ON h.symbol = t.symbol
+                WHERE COALESCE(t.close, 0) > 0
+                  AND COALESCE(t.volume, 0) > 0
+                  AND h.baseline_volume >= ?::BIGINT
+                  AND h.history_points >= ?::BIGINT
+                  AND CAST(t.volume AS DOUBLE) <= h.baseline_volume * ?::DOUBLE
+                """,
+                [
+                    p,
+                    p,
+                    p,
+                    LOW_VOL_LOOKBACK_DAYS,
+                    LOW_VOL_MIN_BASELINE,
+                    LOW_VOL_MIN_HISTORY_POINTS,
+                    LOW_VOL_RATIO,
+                ],
+            ).fetchdf()
+            report["low_volume_outliers_on_max_date"] = int(lv.iloc[0]["cnt"])
+        except Exception:
+            report["low_volume_outliers_on_max_date"] = None
 
         coverage = con.execute(
             """
@@ -505,7 +586,33 @@ def format_report(
     lines.append("|------|-----|")
     lines.append(f"| parquet 내 MAX(ingested_at) | {report.get('max_ingested_at_snapshot') or '(없음/미지원)'} |")
     lines.append(f"| 최대 거래일 행들의 MAX(ingested_at) | {report.get('max_ingested_at_on_max_date') or '(없음/미지원)'} |")
+    zv = report.get("zero_volume_on_max_date")
+    zvcp = report.get("zero_vol_close_pos_on_max_date")
+    rmx = report.get("rows_on_max_date")
+    if zv is not None:
+        lines.append(f"| 최대일 행 수 | {(rmx or 0):,} |")
+        lines.append(f"| 최대일 volume=0 행 수 | {zv:,} |")
+        lines.append(f"| 최대일 volume=0 & close>0 (의심) | {(zvcp or 0):,} |")
+    lv = report.get("low_volume_outliers_on_max_date")
+    if lv is not None:
+        lines.append(
+            f"| 최대일 저거래량 이상치 수 | {lv:,} "
+            f"(ratio<={report['low_volume_ratio_threshold']}, lookback={report['low_volume_lookback_days']}, "
+            f"min_baseline={report['low_volume_min_baseline']}, min_history={report['low_volume_min_history_points']}) |"
+        )
     lines.append("")
+    if zvcp is not None and zvcp > 0:
+        lines.append(
+            f"- ⚠️ 최대 거래일에 **volume=0 이고 close>0** 인 행이 **{zvcp:,}**건 있습니다. "
+            "장중 스냅샷일 수 있으므로 Silver에서 `python -m scripts.repair_zero_volume_day` 후 스냅샷을 다시 빌드하세요."
+        )
+        lines.append("")
+    if lv is not None and lv > 0:
+        lines.append(
+            f"- ⚠️ 최대 거래일에 **저거래량 이상치**가 **{lv:,}**건 있습니다. "
+            "주간 보정에서 low-volume repair를 켜서 재수집하세요."
+        )
+        lines.append("")
     lines.append("## 2. 무결성")
     lines.append("")
     ok = report["integrity_ok"]

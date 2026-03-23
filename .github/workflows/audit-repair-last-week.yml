@@ -1,0 +1,124 @@
+# 최근 N일 Silver 점검(일자별 volume=0 등) + 증분 수집 + 일자별 zero-volume 보정
+#
+# workflow_dispatch: 옵션 입력 가능
+# schedule: 매주 일요일 UTC 21:00 (KST 월요일 06:00), 기본 7일·전체 보정
+name: Audit and repair last week (silver)
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "점검·보정할 달력 일 수 (종료일 포함)"
+        required: false
+        default: "7"
+      audit_only:
+        description: "점검만 (KIS·sync 생략)"
+        type: boolean
+        required: false
+        default: false
+      skip_incremental:
+        description: "incremental_job 생략"
+        type: boolean
+        required: false
+        default: false
+      skip_zero_repair:
+        description: "일자별 volume=0 보정 생략"
+        type: boolean
+        required: false
+        default: false
+      skip_low_volume_repair:
+        description: "일자별 저거래량 이상치 보정 생략"
+        type: boolean
+        required: false
+        default: false
+      low_volume_ratio:
+        description: "저거래량 임계 비율(오늘<=과거중앙값*비율)"
+        required: false
+        default: "0.1"
+      low_volume_lookback_days:
+        description: "저거래량 기준 과거 조회 일수"
+        required: false
+        default: "30"
+      min_baseline_volume:
+        description: "저거래량 기준 최소 baseline(중앙값) 거래량"
+        required: false
+        default: "1000"
+      min_history_points:
+        description: "저거래량 기준 최소 과거 거래일 수"
+        required: false
+        default: "10"
+      release_repo:
+        description: "Silver 동기화 Release repo (URL 또는 owner/repo)"
+        required: false
+        default: "https://github.com/chans-nim/Sauvignon/releases"
+  schedule:
+    - cron: "0 21 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-repair-week
+  cancel-in-progress: false
+
+jobs:
+  audit-repair:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      TZ: Asia/Seoul
+      INPUT_DAYS: ${{ github.event.inputs.days || '7' }}
+      INPUT_AUDIT_ONLY: ${{ github.event.inputs.audit_only || 'false' }}
+      INPUT_SKIP_INCREMENTAL: ${{ github.event.inputs.skip_incremental || 'false' }}
+      INPUT_SKIP_ZERO_REPAIR: ${{ github.event.inputs.skip_zero_repair || 'false' }}
+      INPUT_SKIP_LOW_VOLUME_REPAIR: ${{ github.event.inputs.skip_low_volume_repair || 'false' }}
+      INPUT_LOW_VOLUME_RATIO: ${{ github.event.inputs.low_volume_ratio || '0.1' }}
+      INPUT_LOW_VOLUME_LOOKBACK_DAYS: ${{ github.event.inputs.low_volume_lookback_days || '30' }}
+      INPUT_MIN_BASELINE_VOLUME: ${{ github.event.inputs.min_baseline_volume || '1000' }}
+      INPUT_MIN_HISTORY_POINTS: ${{ github.event.inputs.min_history_points || '10' }}
+      INPUT_RELEASE_REPO: ${{ github.event.inputs.release_repo || 'https://github.com/chans-nim/Sauvignon/releases' }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Sync silver from latest release (base)
+        if: env.INPUT_AUDIT_ONLY != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m scripts.sync_silver_from_github_release --repo "${INPUT_RELEASE_REPO}"
+
+      - name: Refresh universe (meta.duckdb)
+        if: env.INPUT_AUDIT_ONLY != 'true'
+        run: |
+          python -m scripts.run_master_refresh
+
+      - name: Audit (and optional repair)
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          KIS_USER_ID: ${{ secrets.KIS_USER_ID }}
+          KIS_ACC_NUM_MAIN: ${{ secrets.KIS_ACC_NUM_MAIN }}
+          KIS_ACC_NUM_SUB: ${{ secrets.KIS_ACC_NUM_SUB }}
+        run: |
+          set -euo pipefail
+          ARGS=(--days "${INPUT_DAYS}")
+          if [ "${INPUT_AUDIT_ONLY}" = "true" ]; then ARGS+=(--audit-only); fi
+          if [ "${INPUT_SKIP_INCREMENTAL}" = "true" ]; then ARGS+=(--skip-incremental); fi
+          if [ "${INPUT_SKIP_ZERO_REPAIR}" = "true" ]; then ARGS+=(--skip-zero-repair); fi
+          if [ "${INPUT_SKIP_LOW_VOLUME_REPAIR}" = "true" ]; then ARGS+=(--skip-low-volume-repair); fi
+          ARGS+=(--low-volume-ratio "${INPUT_LOW_VOLUME_RATIO}")
+          ARGS+=(--low-volume-lookback-days "${INPUT_LOW_VOLUME_LOOKBACK_DAYS}")
+          ARGS+=(--min-baseline-volume "${INPUT_MIN_BASELINE_VOLUME}")
+          ARGS+=(--min-history-points "${INPUT_MIN_HISTORY_POINTS}")
+          python -m scripts.audit_repair_last_week "${ARGS[@]}"

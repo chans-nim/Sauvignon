@@ -85,6 +85,22 @@ python -m src.publish.trigger_github_actions --tag data-snapshot-20251231-1800 -
    python -m scripts.run_daily_collect
    ```
 
+   **최신일 volume=0 보정** (장중 스냅샷 등으로 당일 봉 거래량이 0으로 남은 종목만 해당 일 재수집):
+
+   ```bash
+   python -m scripts.repair_zero_volume_day
+   python -m scripts.repair_zero_volume_day --date 2026-03-19 --dry-run
+   ```
+
+   **최근 N일 일괄 점검·보정** (GitHub Actions: `Audit and repair last week (silver)` — 수동 실행 또는 매주 일요일 UTC 21:00):
+
+   ```bash
+   python -m scripts.audit_repair_last_week --days 7
+   python -m scripts.audit_repair_last_week --days 7 --audit-only
+   python -m scripts.audit_repair_last_week --days 7 --skip-incremental --skip-zero-repair
+   python -m scripts.audit_repair_last_week --days 7 --low-volume-ratio 0.1 --low-volume-lookback-days 30 --min-baseline-volume 1000 --min-history-points 10
+   ```
+
    **증분 구간 수동 복구** (스케줄 미실행 등으로 특정 구간이 비었을 때):
 
    ```bash
