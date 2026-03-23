@@ -1,20 +1,20 @@
 {
   "schema_version": 2,
   "latest_current": {
-    "tag": "data-snapshot-20260323-1203",
+    "tag": "data-snapshot-20260324-0756",
     "release_type": "snapshot",
-    "file_name": "data-snapshot-20260323-1203.parquet",
-    "sha256": "1684c08d2e293cf9b9b27889e5a08d4686f93eb3c97264b6add6f0142bc51f87",
-    "row_count": 6994163,
-    "created_at": "2026-03-23T12:05:06Z",
+    "file_name": "data-snapshot-20260324-0756.parquet",
+    "sha256": "ecc36f6864661e276b729928149bd61121f55071703104a58e366240f6cac199",
+    "row_count": 6994165,
+    "created_at": "2026-03-23T22:57:32Z",
     "min_date": "2016-01-04",
-    "max_date": "2026-03-23",
+    "max_date": "2026-03-24",
     "assets": [
       {
-        "name": "data-snapshot-20260323-1203.parquet",
-        "sha256": "1684c08d2e293cf9b9b27889e5a08d4686f93eb3c97264b6add6f0142bc51f87",
-        "bytes": 136755251,
-        "updated_at": "2026-03-23T12:05:06Z",
+        "name": "data-snapshot-20260324-0756.parquet",
+        "sha256": "ecc36f6864661e276b729928149bd61121f55071703104a58e366240f6cac199",
+        "bytes": 136766248,
+        "updated_at": "2026-03-23T22:57:32Z",
         "release_type": "snapshot"
       }
     ]
@@ -32,10 +32,15 @@
     "assets": []
   },
   "release_type": "snapshot",
-  "row_count": 6994163,
-  "created_at": "2026-03-23T12:05:06Z",
+  "row_count": 6994165,
+  "created_at": "2026-03-23T22:57:32Z",
   "history": {
     "release_tags": [
+      {
+        "tag": "data-snapshot-20260324-0756",
+        "release_type": "snapshot",
+        "created_at": "2026-03-23T22:57:32Z"
+      },
       {
         "tag": "data-snapshot-20260323-1203",
         "release_type": "snapshot",
