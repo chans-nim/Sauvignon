@@ -51,14 +51,23 @@ on:
         description: "Silver 동기화 Release repo (URL 또는 owner/repo)"
         required: false
         default: "https://github.com/chans-nim/Sauvignon/releases"
+      publish_release:
+        description: "보정 결과를 새 snapshot release로 발행"
+        type: boolean
+        required: false
+        default: true
+      publish_tag:
+        description: "선택: 발행할 release tag (비우면 자동 생성)"
+        required: false
+        default: ""
   schedule:
     - cron: "0 21 * * 0"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: audit-repair-week
+  group: refresh-snapshot
   cancel-in-progress: false
 
 jobs:
@@ -77,9 +86,17 @@ jobs:
       INPUT_MIN_BASELINE_VOLUME: ${{ github.event.inputs.min_baseline_volume || '1000' }}
       INPUT_MIN_HISTORY_POINTS: ${{ github.event.inputs.min_history_points || '10' }}
       INPUT_RELEASE_REPO: ${{ github.event.inputs.release_repo || 'https://github.com/chans-nim/Sauvignon/releases' }}
+      INPUT_PUBLISH_RELEASE: ${{ github.event.inputs.publish_release || 'true' }}
+      INPUT_PUBLISH_TAG: ${{ github.event.inputs.publish_tag || '' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Configure Git (for manifest updates)
+        if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -122,3 +139,112 @@ jobs:
           ARGS+=(--min-baseline-volume "${INPUT_MIN_BASELINE_VOLUME}")
           ARGS+=(--min-history-points "${INPUT_MIN_HISTORY_POINTS}")
           python -m scripts.audit_repair_last_week "${ARGS[@]}"
+
+      - name: Build snapshot from repaired silver
+        if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
+        id: build_snapshot
+        env:
+          PUBLISH_TAG: ${{ env.INPUT_PUBLISH_TAG }}
+        run: |
+          python - << 'PY'
+          import json, os, subprocess, sys
+          cmd = [sys.executable, "-m", "src.jobs.full_snapshot_job", "--mode", "snapshot"]
+          publish_tag = (os.environ.get("PUBLISH_TAG") or "").strip()
+          if publish_tag:
+              cmd += ["--tag", publish_tag]
+          p = subprocess.run(cmd, capture_output=True, text=True, check=True)
+          out = (p.stdout or "").strip()
+          i = out.rfind("{")
+          if i < 0:
+              print(out)
+              raise SystemExit("Could not find JSON in snapshot build output")
+          payload_text = out[i:]
+          payload = json.loads(payload_text)
+          print(json.dumps(payload, ensure_ascii=False))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"tag={payload['tag']}\n")
+              f.write(f"parquet_path={payload['parquet_path']}\n")
+              f.write(f"sha_path={payload['sha_path']}\n")
+              f.write(f"manifest_path={payload['manifest_path']}\n")
+              f.write(f"sha256={payload['sha256']}\n")
+              f.write(f"row_count={payload.get('row_count') or ''}\n")
+              f.write(f"min_date={payload.get('min_date') or ''}\n")
+              f.write(f"max_date={payload.get('max_date') or ''}\n")
+          PY
+
+      - name: Validate built snapshot (local)
+        if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
+        run: |
+          python -m scripts.validate_snapshot --file-path "${{ steps.build_snapshot.outputs.parquet_path }}" --allow-missing-meta
+
+      - name: Create release if not exists
+        if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.build_snapshot.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release exists: $TAG"
+          else
+            gh release create "$TAG" -t "$TAG" -n "Snapshot dataset: $TAG"
+          fi
+
+      - name: Upload release assets
+        if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.build_snapshot.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "${{ steps.build_snapshot.outputs.parquet_path }}" --clobber
+          gh release upload "$TAG" "${{ steps.build_snapshot.outputs.sha_path }}" --clobber
+          gh release upload "$TAG" "${{ steps.build_snapshot.outputs.manifest_path }}" --clobber
+
+      - name: Update data_manifest.json
+        if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.build_snapshot.outputs.tag }}
+          RELEASE_TYPE: snapshot
+          ASSET_SHA256: ${{ steps.build_snapshot.outputs.sha256 }}
+          MIN_DATE: ${{ steps.build_snapshot.outputs.min_date }}
+          MAX_DATE: ${{ steps.build_snapshot.outputs.max_date }}
+          ROW_COUNT: ${{ steps.build_snapshot.outputs.row_count }}
+        run: |
+          python3 - << 'PY'
+          import json, os
+          from datetime import datetime
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, ".")
+          from src.publish.manifest_update import ensure_manifest_structure, build_release_entry, update_manifest_payload
+          tag = os.environ["TAG"]
+          release_type = os.environ["RELEASE_TYPE"]
+          sha = os.environ["ASSET_SHA256"]
+          min_date = os.environ.get("MIN_DATE") or None
+          max_date = os.environ.get("MAX_DATE") or None
+          row_count = os.environ.get("ROW_COUNT") or None
+          path = Path("data_manifest.json")
+          m = ensure_manifest_structure(json.loads(path.read_text(encoding="utf-8")) if path.exists() else None)
+          fname = f"{tag}.parquet"
+          parquet_path = Path("data/snapshot") / fname
+          bytes_ = parquet_path.stat().st_size if parquet_path.exists() else 0
+          created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+          entry = build_release_entry(
+              tag=tag,
+              release_type=release_type,
+              file_name=fname,
+              sha256=sha,
+              bytes_size=bytes_,
+              created_at=created_at,
+              row_count=(int(row_count) if row_count else None),
+              min_date=min_date,
+              max_date=max_date,
+          )
+          m = update_manifest_payload(m, entry)
+          path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+          git add data_manifest.json
+          git commit -m "data: update manifest for $TAG" || true
+          git push
