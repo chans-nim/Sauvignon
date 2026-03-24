@@ -17,6 +17,7 @@ import argparse
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime
@@ -252,15 +253,135 @@ def query_symbol_last_day_max_ingested(parquet_path: Path, symbol: str, market: 
     return s or None
 
 
+def _gh_subprocess_env() -> dict:
+    env = os.environ.copy()
+    pat = os.getenv("GH_PAT_SAUVIGNON") or ""
+    if pat:
+        env["GH_TOKEN"] = pat
+    return env
+
+
 def gh_latest_tag(repo: str) -> str:
     # 최신 1개 태그만
     out = subprocess.check_output(
         ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
         text=True,
+        env=_gh_subprocess_env(),
     ).strip()
     if not out:
         raise SystemExit(f"No releases found in {repo}")
     return out
+
+
+def release_tag_sort_key(tag: str) -> tuple:
+    """data-snapshot-YYYYMMDD-HHMM 등 태그를 비교 가능한 튜플로 변환."""
+    m = re.match(r"^data-(?:snapshot|full|delta)-(\d{8})-(\d{4})$", tag)
+    if m:
+        return (0, m.group(1), m.group(2))
+    return (1, tag, "")
+
+
+def gh_latest_tag_optional(repo: str) -> str | None:
+    """gh 실패·미설치 시 None (manifest 등으로 폴백)."""
+    r = parse_repo_from_url(repo)
+    try:
+        out = subprocess.check_output(
+            ["gh", "release", "list", "--repo", r, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            env=_gh_subprocess_env(),
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        return None
+    return out or None
+
+
+def _github_token_for_api() -> str:
+    return (
+        (os.getenv("GH_PAT_SAUVIGNON") or "").strip()
+        or (os.getenv("GITHUB_TOKEN") or "").strip()
+        or (os.getenv("GH_TOKEN") or "").strip()
+        or (os.getenv("GH_PAT") or "").strip()
+    )
+
+
+def github_latest_release_tag_http(repo: str) -> str | None:
+    """
+    gh CLI 없이 GitHub REST API로 최신 릴리즈 tag_name 조회.
+    (Windows 등에서 gh 미설치인데 PAT만 있는 경우와 동일하게 동작하도록)
+    """
+    import requests
+
+    owner_repo = parse_repo_from_url(repo)
+    headers = {
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Accept": "application/vnd.github+json",
+    }
+    token = _github_token_for_api()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    latest_url = f"https://api.github.com/repos/{owner_repo}/releases/latest"
+    try:
+        r = requests.get(latest_url, headers=headers, timeout=30)
+    except OSError:
+        return None
+
+    if r.status_code == 200:
+        data = r.json()
+        if isinstance(data, dict):
+            t = (data.get("tag_name") or "").strip()
+            return t or None
+        return None
+
+    if r.status_code == 404:
+        list_url = f"https://api.github.com/repos/{owner_repo}/releases"
+        try:
+            r2 = requests.get(list_url, headers=headers, timeout=30)
+        except OSError:
+            return None
+        if r2.status_code != 200:
+            return None
+        releases = r2.json()
+        if not isinstance(releases, list) or not releases:
+            return None
+        for rel in releases:
+            if isinstance(rel, dict) and not rel.get("draft") and not rel.get("prerelease"):
+                t = (rel.get("tag_name") or "").strip()
+                if t:
+                    return t
+        rel0 = releases[0]
+        if isinstance(rel0, dict):
+            t = (rel0.get("tag_name") or "").strip()
+            return t or None
+    return None
+
+
+def remote_latest_release_tag(repo: str) -> str | None:
+    """gh 우선, 실패 시 HTTP API."""
+    return gh_latest_tag_optional(repo) or github_latest_release_tag_http(repo)
+
+
+def resolve_default_release_tag(repo: str) -> tuple[str, str | None, bool]:
+    """
+    manifest와 GitHub 최신 릴리즈 중 더 새 태그를 고른다.
+    Returns: (resolved_tag, manifest_tag_from_file_or_none, chose_github_over_manifest)
+    """
+    manifest_tag = load_manifest_tag()
+    gh_tag = remote_latest_release_tag(repo)
+    if manifest_tag and gh_tag:
+        if release_tag_sort_key(gh_tag) > release_tag_sort_key(manifest_tag):
+            return gh_tag, manifest_tag, True
+        return manifest_tag, manifest_tag, False
+    if manifest_tag:
+        return manifest_tag, manifest_tag, False
+    if gh_tag:
+        return gh_tag, None, False
+    raise SystemExit(
+        "Could not resolve release tag: data_manifest.json has no latest_current and "
+        "GitHub 최신 릴리즈 조회(gh 또는 API)에 실패했습니다. "
+        "--release-tag 를 지정하거나 GH_PAT_SAUVIGNON / gh 인증을 확인하세요."
+    )
 
 
 def resolve_local_release_parquet(tag: str) -> Path | None:
@@ -378,15 +499,43 @@ def download_release_parquet_http(repo: str, tag: str, release_dir: Path) -> Pat
 
 
 def load_release_series(
-    symbol: str, market: str, *, repo: str, tag: str | None, download_dir: Path
+    symbol: str,
+    market: str,
+    *,
+    repo: str,
+    tag: str | None,
+    download_dir: Path,
+    prefer_manifest: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """
     GitHub Release 스냅샷 parquet에서 해당 종목 OHLCV 시계열 + 수집·릴리즈 메타를 반환한다.
+
+    기본(--release-tag 없음): 로컬 data_manifest.json 과 `gh release list` 최신 태그 중
+    타임스탬프가 더 새 쪽을 사용한다 (로컬 manifest만 오래된 경우 GitHub 최신을 따름).
     """
     import duckdb
 
     repo = parse_repo_from_url(repo)
-    resolved_tag = tag or load_manifest_tag() or gh_latest_tag(repo)
+    manifest_file_tag = load_manifest_tag()
+    chose_gh_over_manifest = False
+    if tag:
+        resolved_tag = tag
+    elif prefer_manifest:
+        resolved_tag = manifest_file_tag or remote_latest_release_tag(repo)
+        if not resolved_tag:
+            raise SystemExit(
+                "--prefer-manifest 인데 data_manifest.json 에 latest_current 가 없고, "
+                "GitHub 최신 릴리즈도 조회할 수 없습니다."
+            )
+    else:
+        resolved_tag, _mf, chose_gh_over_manifest = resolve_default_release_tag(repo)
+
+    if chose_gh_over_manifest and manifest_file_tag:
+        print(
+            f"[ticker_report] note: data_manifest.json latest_current={manifest_file_tag} "
+            f"is older than GitHub latest; using release {resolved_tag}."
+        )
+
     m_entry = manifest_latest_current_entry()
     manifest_created_at = (m_entry or {}).get("created_at")
     manifest_max_date = (m_entry or {}).get("max_date")
@@ -416,6 +565,8 @@ def load_release_series(
     last_ingested = query_symbol_last_day_max_ingested(local_parquet, symbol, market)
     meta = {
         "release_tag": resolved_tag,
+        "manifest_file_tag": manifest_file_tag,
+        "used_newer_github_release_than_manifest": chose_gh_over_manifest,
         "parquet_path": str(local_parquet),
         "manifest_created_at": str(manifest_created_at) if manifest_created_at else None,
         "manifest_max_date": str(manifest_max_date) if manifest_max_date else None,
@@ -711,6 +862,13 @@ def build_report(
             f'<div>manifest 최대 거래일: {html.escape(str(mm))}</div>'
             f'<div>본 종목 최종일 ingested_at 최대: {html.escape(str(li))}</div>'
         )
+        mft = release_source_meta.get("manifest_file_tag")
+        if release_source_meta.get("used_newer_github_release_than_manifest") and mft:
+            release_hero_lines += (
+                '<div class="note">로컬 <code>data_manifest.json</code>의 '
+                f"<code>latest_current</code> 태그({html.escape(str(mft))})보다 GitHub 최신 릴리즈가 "
+                f"새로워 <strong>{html.escape(str(rt))}</strong>를 사용했습니다.</div>"
+            )
 
     summary_table = render_html_table(
         ["항목", "값", "의미"],
@@ -739,6 +897,16 @@ def build_report(
                 ["항목", "값", "의미"],
                 [
                     ["release_tag", str(release_source_meta.get("release_tag") or "-"), "사용한 GitHub Release 태그"],
+                    [
+                        "manifest_file_tag",
+                        str(release_source_meta.get("manifest_file_tag") or "-"),
+                        "로컬 data_manifest.json latest_current.tag (실제 사용 태그와 다를 수 있음)",
+                    ],
+                    [
+                        "used_newer_github_than_manifest",
+                        str(release_source_meta.get("used_newer_github_release_than_manifest") or False),
+                        "GitHub 최신 릴리즈가 manifest보다 새로 선택됨 여부",
+                    ],
                     ["manifest_created_at", str(release_source_meta.get("manifest_created_at") or "-"), "data_manifest 기준 스냅샷 반영 시각(UTC)"],
                     ["manifest_max_date", str(release_source_meta.get("manifest_max_date") or "-"), "스냅샷에 포함된 최대 거래일"],
                     [
@@ -926,7 +1094,16 @@ def main() -> None:
     parser.add_argument("--out-dir", default="reports", help="리포트 출력 디렉터리")
     parser.add_argument("--mode", choices=("release", "silver"), default="release", help="OHLCV 시계열 데이터 소스")
     parser.add_argument("--release-repo", default="chans-nim/Sauvignon", help="Release repo (owner/name or URL)")
-    parser.add_argument("--release-tag", default=None, help="Release tag (default: data_manifest.latest_current or gh latest)")
+    parser.add_argument(
+        "--release-tag",
+        default=None,
+        help="Release tag (default: manifest vs GitHub 최신 중 태그 시각이 더 새 쪽)",
+    )
+    parser.add_argument(
+        "--prefer-manifest",
+        action="store_true",
+        help="data_manifest.json latest_current를 우선 (GitHub에 더 새 릴리즈가 있어도 무시)",
+    )
     parser.add_argument("--download-dir", default=DOWNLOAD_DIR.as_posix(), help="Release parquet 다운로드 디렉터리")
     args = parser.parse_args()
 
@@ -950,6 +1127,7 @@ def main() -> None:
             repo=args.release_repo,
             tag=args.release_tag,
             download_dir=Path(args.download_dir),
+            prefer_manifest=args.prefer_manifest,
         )
     raw_path, raw_data = load_latest_raw(symbol)
     report = build_report(
