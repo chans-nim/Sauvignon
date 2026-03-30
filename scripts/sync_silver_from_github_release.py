@@ -36,6 +36,53 @@ APPLIED_STATE_PATH = settings.project_root / "meta" / "applied_release_state.jso
 DOWNLOAD_DIR = settings.project_root / "data" / "downloads"
 
 
+def is_companion_parquet_name(name: str) -> bool:
+    """Exclude ticker-state / output1-latest; sync silver uses only the main OHLCV snapshot."""
+    n = str(name).lower()
+    return n.endswith(".ticker-state.parquet") or n.endswith(".output1-latest.parquet")
+
+
+def pick_parquet_release_asset(assets: list, tag: str) -> dict | None:
+    """API asset dict for the main snapshot parquet (not companion files)."""
+    by_name = {str(a.get("name") or ""): a for a in assets if isinstance(a, dict)}
+    main_name = f"{tag}.parquet"
+    if main_name in by_name:
+        return by_name[main_name]
+    candidates = [
+        a
+        for a in assets
+        if isinstance(a, dict)
+        and str(a.get("name") or "").endswith(".parquet")
+        and not is_companion_parquet_name(str(a.get("name") or ""))
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        return None
+    names = ", ".join(sorted(str(a.get("name") or "") for a in candidates))
+    raise SystemExit(
+        f"Ambiguous main parquet for {tag!r} (API assets): {names}; expected {main_name} on the release."
+    )
+
+
+def resolve_main_parquet_path(out_dir: Path, tag: str) -> Path:
+    """After gh/curl download, pick the OHLCV snapshot file matching the release tag."""
+    preferred = out_dir / f"{tag}.parquet"
+    if preferred.is_file():
+        return preferred
+    parquets = [
+        p
+        for p in out_dir.glob("*.parquet")
+        if p.is_file() and not is_companion_parquet_name(p.name)
+    ]
+    if len(parquets) == 1:
+        return parquets[0]
+    if not parquets:
+        raise SystemExit(f"No main snapshot parquet in {out_dir} (expected {tag}.parquet)")
+    names = ", ".join(sorted(p.name for p in parquets))
+    raise SystemExit(f"Ambiguous parquet files in {out_dir}: {names}; expected {tag}.parquet")
+
+
 def parse_repo_from_url(repo_or_url: str) -> str:
     s = repo_or_url.strip()
     if "github.com" in s:
@@ -144,12 +191,15 @@ def gh_download_release_assets(repo: str, tag: str, out_dir: Path) -> tuple[Path
         )
     except (FileNotFoundError, subprocess.CalledProcessError, OSError):
         return http_download_release_assets(repo, tag, out_dir)
-    parquets = sorted(out_dir.glob("*.parquet"))
-    if not parquets:
+    if not any(out_dir.glob("*.parquet")):
         raise SystemExit(f"No parquet asset downloaded for {repo}@{tag}")
-    parquet_path = parquets[0]
+    parquet_path = resolve_main_parquet_path(out_dir, tag)
+    sha_named = out_dir / f"{tag}.sha256"
     sha_files = sorted(out_dir.glob("*.sha256"))
-    sha_path = sha_files[0] if sha_files else None
+    if sha_named.is_file():
+        sha_path = sha_named
+    else:
+        sha_path = sha_files[0] if sha_files else None
     return parquet_path, sha_path
 
 
@@ -159,10 +209,15 @@ def http_download_release_assets(repo: str, tag: str, out_dir: Path) -> tuple[Pa
     r.raise_for_status()
     payload = r.json()
     assets = payload.get("assets") or []
-    parquet_asset = next((a for a in assets if str(a.get("name") or "").endswith(".parquet")), None)
-    sha_asset = next((a for a in assets if str(a.get("name") or "").endswith(".sha256")), None)
+    parquet_asset = pick_parquet_release_asset(assets, tag)
+    sha_main = f"{tag}.sha256"
+    by_asset_name = {str(a.get("name") or ""): a for a in assets if isinstance(a, dict)}
+    sha_asset = by_asset_name.get(sha_main) or next(
+        (a for a in assets if isinstance(a, dict) and str(a.get("name") or "").endswith(".sha256")),
+        None,
+    )
     if not parquet_asset:
-        raise SystemExit(f"No parquet assets found in {repo}@{tag}")
+        raise SystemExit(f"No main parquet assets found in {repo}@{tag} (need {tag}.parquet or a single non-companion .parquet)")
     parquet_path = download_asset_by_api(repo, parquet_asset, out_dir / str(parquet_asset.get("name") or f"{tag}.parquet"))
     sha_path = None
     if sha_asset:
