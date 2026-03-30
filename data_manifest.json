@@ -1,20 +1,20 @@
 {
   "schema_version": 2,
   "latest_current": {
-    "tag": "data-snapshot-20260325-0608",
+    "tag": "data-snapshot-20260330-0653",
     "release_type": "snapshot",
-    "file_name": "data-snapshot-20260325-0608.parquet",
-    "sha256": "0c9a7fe29baeced8069a3173e35ffd7dbeaba9f4d894c57436b33be350806459",
-    "row_count": 7002624,
-    "created_at": "2026-03-25T06:09:51Z",
+    "file_name": "data-snapshot-20260330-0653.parquet",
+    "sha256": "4a013b2a332ea55d720086e000f0085c2a8af30b9fb58f7fdbb57afe26b35b72",
+    "row_count": 7011083,
+    "created_at": "2026-03-29T21:53:46Z",
     "min_date": "2016-01-04",
-    "max_date": "2026-03-25",
+    "max_date": "2026-03-30",
     "assets": [
       {
-        "name": "data-snapshot-20260325-0608.parquet",
-        "sha256": "0c9a7fe29baeced8069a3173e35ffd7dbeaba9f4d894c57436b33be350806459",
-        "bytes": 136885391,
-        "updated_at": "2026-03-25T06:09:51Z",
+        "name": "data-snapshot-20260330-0653.parquet",
+        "sha256": "4a013b2a332ea55d720086e000f0085c2a8af30b9fb58f7fdbb57afe26b35b72",
+        "bytes": 137112795,
+        "updated_at": "2026-03-29T21:53:46Z",
         "release_type": "snapshot"
       }
     ]
@@ -32,10 +32,40 @@
     "assets": []
   },
   "release_type": "snapshot",
-  "row_count": 7002624,
-  "created_at": "2026-03-25T06:09:51Z",
+  "row_count": 7011083,
+  "created_at": "2026-03-29T21:53:46Z",
   "history": {
     "release_tags": [
+      {
+        "tag": "data-snapshot-20260330-0653",
+        "release_type": "snapshot",
+        "created_at": "2026-03-29T21:53:46Z"
+      },
+      {
+        "tag": "data-snapshot-20260327-1206",
+        "release_type": "snapshot",
+        "created_at": "2026-03-27T12:07:56Z"
+      },
+      {
+        "tag": "data-snapshot-20260327-0545",
+        "release_type": "snapshot",
+        "created_at": "2026-03-27T05:46:21Z"
+      },
+      {
+        "tag": "data-snapshot-20260326-1209",
+        "release_type": "snapshot",
+        "created_at": "2026-03-26T12:10:54Z"
+      },
+      {
+        "tag": "data-snapshot-20260326-0614",
+        "release_type": "snapshot",
+        "created_at": "2026-03-26T06:15:32Z"
+      },
+      {
+        "tag": "data-snapshot-20260325-1207",
+        "release_type": "snapshot",
+        "created_at": "2026-03-25T12:08:26Z"
+      },
       {
         "tag": "data-snapshot-20260325-0608",
         "release_type": "snapshot",
