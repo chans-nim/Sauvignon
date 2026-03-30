@@ -65,6 +65,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--asset-url", default=None, help="Public asset URL. Naver MYBOX public download URL is allowed.")
     parser.add_argument("--delta-url", default=None, help="Deprecated alias for --asset-url")
+    parser.add_argument("--json-url", default=None, help="Optional snapshot manifest JSON URL")
+    parser.add_argument("--sha256-url", default=None, help="Optional sha256 URL")
+    parser.add_argument("--ticker-state-url", default=None, help="Optional ticker-state parquet URL")
+    parser.add_argument("--output1-latest-url", default=None, help="Optional output1-latest parquet URL")
     parser.add_argument("--release-type", choices=("delta", "snapshot", "full"), default=None)
     parser.add_argument("--workflow", default=None, help="Workflow file or name to dispatch")
     parser.add_argument("--run", action="store_true")
@@ -92,6 +96,15 @@ def main() -> None:
         "-f", f"asset_name={meta['file_name']}",
         "-f", f"row_count={meta.get('row_count') or ''}",
     ]
+    optional_inputs = [
+        ("json_url", args.json_url),
+        ("sha256_url", args.sha256_url),
+        ("ticker_state_url", args.ticker_state_url),
+        ("output1_latest_url", args.output1_latest_url),
+    ]
+    for key, value in optional_inputs:
+        if value:
+            cmd.extend(["-f", f"{key}={value}"])
     print("[COMMAND]")
     print(" ".join(cmd))
     if args.run:

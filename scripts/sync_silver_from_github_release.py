@@ -15,12 +15,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -57,29 +59,91 @@ def load_manifest_tag(path: Path = MANIFEST_PATH) -> str | None:
     return None
 
 
+def release_tag_sort_key(tag: str) -> tuple:
+    m = re.match(r"^data-(?:snapshot|full|delta)-(\d{8})-(\d{4})$", str(tag))
+    if m:
+        return (0, m.group(1), m.group(2))
+    return (1, str(tag), "")
+
+
 def gh_latest_tag(repo: str) -> str:
-    # 최신 1개 태그만
-    out = subprocess.check_output(
-        ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
-        text=True,
-    ).strip()
+    # 최신 1개 태그만 (gh 우선, 실패 시 HTTP API)
+    try:
+        out = subprocess.check_output(
+            ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
+            text=True,
+        ).strip()
+        if out:
+            return out
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        pass
+    out = http_latest_tag(repo)
     if not out:
         raise SystemExit(f"No releases found in {repo}")
     return out
 
 
+def github_token() -> str:
+    return (
+        os.getenv("GH_PAT_SAUVIGNON")
+        or os.getenv("GITHUB_TOKEN")
+        or os.getenv("GH_TOKEN")
+        or os.getenv("GH_PAT")
+        or ""
+    ).strip()
+
+
+def github_headers(*, binary: bool = False) -> dict[str, str]:
+    headers: dict[str, str] = {
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Accept": "application/octet-stream" if binary else "application/vnd.github+json",
+    }
+    token = github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def http_latest_tag(repo: str) -> str | None:
+    latest_url = f"https://api.github.com/repos/{repo}/releases/latest"
+    r = requests.get(latest_url, headers=github_headers(binary=False), timeout=30)
+    if r.status_code == 200:
+        payload = r.json()
+        tag = str(payload.get("tag_name") or "").strip()
+        return tag or None
+    if r.status_code == 404:
+        list_url = f"https://api.github.com/repos/{repo}/releases"
+        r2 = requests.get(list_url, headers=github_headers(binary=False), timeout=30)
+        r2.raise_for_status()
+        releases = r2.json()
+        if not releases:
+            return None
+        for rel in releases:
+            if not rel.get("draft") and not rel.get("prerelease"):
+                tag = str(rel.get("tag_name") or "").strip()
+                if tag:
+                    return tag
+        tag = str((releases[0] or {}).get("tag_name") or "").strip()
+        return tag or None
+    r.raise_for_status()
+    return None
+
+
 def gh_download_release_assets(repo: str, tag: str, out_dir: Path) -> tuple[Path, Path | None]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    # parquet
-    subprocess.run(
-        ["gh", "release", "download", tag, "--repo", repo, "-D", str(out_dir), "-p", "*.parquet"],
-        check=True,
-    )
-    # sha256 (optional)
-    subprocess.run(
-        ["gh", "release", "download", tag, "--repo", repo, "-D", str(out_dir), "-p", "*.sha256"],
-        check=False,
-    )
+    try:
+        # parquet
+        subprocess.run(
+            ["gh", "release", "download", tag, "--repo", repo, "-D", str(out_dir), "-p", "*.parquet"],
+            check=True,
+        )
+        # sha256 (optional)
+        subprocess.run(
+            ["gh", "release", "download", tag, "--repo", repo, "-D", str(out_dir), "-p", "*.sha256"],
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        return http_download_release_assets(repo, tag, out_dir)
     parquets = sorted(out_dir.glob("*.parquet"))
     if not parquets:
         raise SystemExit(f"No parquet asset downloaded for {repo}@{tag}")
@@ -87,6 +151,52 @@ def gh_download_release_assets(repo: str, tag: str, out_dir: Path) -> tuple[Path
     sha_files = sorted(out_dir.glob("*.sha256"))
     sha_path = sha_files[0] if sha_files else None
     return parquet_path, sha_path
+
+
+def http_download_release_assets(repo: str, tag: str, out_dir: Path) -> tuple[Path, Path | None]:
+    rel_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    r = requests.get(rel_url, headers=github_headers(binary=False), timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    assets = payload.get("assets") or []
+    parquet_asset = next((a for a in assets if str(a.get("name") or "").endswith(".parquet")), None)
+    sha_asset = next((a for a in assets if str(a.get("name") or "").endswith(".sha256")), None)
+    if not parquet_asset:
+        raise SystemExit(f"No parquet assets found in {repo}@{tag}")
+    parquet_path = download_asset_by_api(repo, parquet_asset, out_dir / str(parquet_asset.get("name") or f"{tag}.parquet"))
+    sha_path = None
+    if sha_asset:
+        sha_path = download_asset_by_api(repo, sha_asset, out_dir / str(sha_asset.get("name") or f"{tag}.sha256"))
+    return parquet_path, sha_path
+
+
+def download_asset_by_api(repo: str, asset: dict, dest: Path) -> Path:
+    asset_id = asset.get("id")
+    if not asset_id:
+        raise SystemExit(f"Missing asset id for {asset.get('name')}")
+    url = f"https://api.github.com/repos/{repo}/releases/assets/{asset_id}"
+    with requests.get(url, headers=github_headers(binary=True), stream=True, timeout=300, allow_redirects=True) as r:
+        r.raise_for_status()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    f.write(chunk)
+    return dest
+
+
+def resolve_default_tag(repo: str) -> str:
+    """
+    --tag 미지정 시, 로컬 manifest와 원격 최신 릴리즈 중 더 최신 태그를 선택한다.
+    """
+    manifest_tag = load_manifest_tag()
+    remote_tag = gh_latest_tag(repo)
+    if manifest_tag and remote_tag:
+        if release_tag_sort_key(remote_tag) > release_tag_sort_key(manifest_tag):
+            print(f"[sync] note: manifest tag={manifest_tag} is older than remote latest={remote_tag}; using remote latest")
+            return remote_tag
+        return manifest_tag
+    return manifest_tag or remote_tag
 
 
 def read_expected_sha256(sha_path: Path | None) -> str | None:
@@ -116,7 +226,7 @@ def main() -> None:
     args = parser.parse_args()
 
     repo = parse_repo_from_url(args.repo)
-    tag = args.tag or load_manifest_tag() or gh_latest_tag(repo)
+    tag = args.tag or resolve_default_tag(repo)
     release_dir = args.download_dir / tag
 
     print(f"[sync] repo={repo} tag={tag}")

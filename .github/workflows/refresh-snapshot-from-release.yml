@@ -199,9 +199,17 @@ jobs:
           TAG: ${{ steps.build_snapshot.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release upload "$TAG" "${{ steps.build_snapshot.outputs.parquet_path }}" --clobber
-          gh release upload "$TAG" "${{ steps.build_snapshot.outputs.sha_path }}" --clobber
-          gh release upload "$TAG" "${{ steps.build_snapshot.outputs.manifest_path }}" --clobber
+          shopt -s nullglob
+          files=(data/snapshot/"${TAG}"*)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No bundle files under data/snapshot for ${TAG}"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || continue
+            echo "Uploading $f"
+            gh release upload "$TAG" "$f" --clobber
+          done
 
       - name: Update data_manifest.json
         env:
@@ -219,7 +227,12 @@ jobs:
           from pathlib import Path
           import sys
           sys.path.insert(0, ".")
-          from src.publish.manifest_update import ensure_manifest_structure, build_release_entry, update_manifest_payload
+          from src.publish.manifest_update import (
+              build_assets_from_bundle_dir,
+              build_release_entry,
+              ensure_manifest_structure,
+              update_manifest_payload,
+          )
           tag = os.environ["TAG"]
           release_type = os.environ["RELEASE_TYPE"]
           sha = os.environ["ASSET_SHA256"]
@@ -232,6 +245,7 @@ jobs:
           parquet_path = Path("data/snapshot") / fname
           bytes_ = parquet_path.stat().st_size if parquet_path.exists() else 0
           created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+          assets = build_assets_from_bundle_dir(tag, release_type=release_type, created_at=created_at)
           entry = build_release_entry(
               tag=tag,
               release_type=release_type,
@@ -242,6 +256,7 @@ jobs:
               row_count=(int(row_count) if row_count else None),
               min_date=min_date,
               max_date=max_date,
+              assets=assets,
           )
           m = update_manifest_payload(m, entry)
           path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")

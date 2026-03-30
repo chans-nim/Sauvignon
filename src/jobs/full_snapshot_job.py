@@ -47,7 +47,22 @@ def main() -> None:
         result.row_count,
         result.file_path,
     )
-    print(json.dumps(result.__dict__, ensure_ascii=False, indent=2))
+    payload = {
+        "tag": result.tag,
+        "release_type": result.release_type,
+        "file_name": result.file_name,
+        "file_path": result.file_path,
+        "sha256": result.sha256,
+        "row_count": result.row_count,
+        "min_date": result.min_date,
+        "max_date": result.max_date,
+        "created_at": result.created_at,
+        "latest_current": result.latest_current,
+        "parquet_path": result.parquet_path,
+        "sha_path": result.sha_path,
+        "manifest_path": result.manifest_path,
+    }
+    print(json.dumps(payload, ensure_ascii=False))
 
 
 if __name__ == "__main__":

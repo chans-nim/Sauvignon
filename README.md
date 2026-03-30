@@ -43,6 +43,10 @@ python -m src.publish.trigger_github_actions --tag data-delta-20251231-1800 --as
 # snapshot 생성 / 액션 트리거
 python -m src.jobs.full_snapshot_job --mode snapshot
 python -m src.publish.trigger_github_actions --tag data-snapshot-20251231-1800 --asset-url "https://your-public-download.example.com/data-snapshot-20251231-1800.parquet"
+
+# 최신 GitHub Release를 베이스로 로컬 snapshot 재생성 -> staging 업로드 -> GitHub Release 트리거
+python -m scripts.rebuild_snapshot_from_latest_release --repo chans-nim/Sauvignon --stage
+python -m scripts.rebuild_snapshot_from_latest_release --repo chans-nim/Sauvignon --stage --dispatch-release
 ```
 
 ## 초기 10년치 수집 + 백업 + 이후 운영

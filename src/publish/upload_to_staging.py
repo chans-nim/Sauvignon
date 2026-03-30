@@ -48,10 +48,18 @@ def stage_release_assets(tag: str) -> list[Path]:
     resolved_tag, src_dir = resolve_tag(tag)
     copied: list[Path] = []
 
-    for suffix in [".parquet", ".sha256", ".json"]:
-        src = src_dir / f"{resolved_tag}{suffix}"
-        if not src.exists():
-            raise FileNotFoundError(f"missing release asset: {src}")
+    bundle_files = sorted(
+        p for p in src_dir.glob(f"{resolved_tag}*")
+        if p.is_file()
+    )
+    if not bundle_files:
+        raise FileNotFoundError(f"missing release asset bundle for tag '{resolved_tag}' in {src_dir}")
+    required = {f"{resolved_tag}.parquet", f"{resolved_tag}.sha256", f"{resolved_tag}.json"}
+    missing_required = sorted(name for name in required if not (src_dir / name).exists())
+    if missing_required:
+        raise FileNotFoundError(f"missing required release assets: {', '.join(missing_required)}")
+
+    for src in bundle_files:
         dst = STAGING_DIR / src.name
         shutil.copy2(src, dst)
         copied.append(dst)

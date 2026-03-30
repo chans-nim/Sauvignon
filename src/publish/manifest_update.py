@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
+from pathlib import Path
 
 
 def default_manifest() -> dict:
@@ -57,6 +59,35 @@ def ensure_manifest_structure(manifest: dict | None) -> dict:
     return out
 
 
+def iter_snapshot_bundle_files(tag: str, snapshot_dir: Path | None = None) -> list[Path]:
+    """Files in snapshot_dir named ``{tag}.*`` (parquet, json, sha256, companion parquets)."""
+    base = snapshot_dir or Path("data") / "snapshot"
+    if not base.is_dir():
+        return []
+    prefix = f"{tag}."
+    return sorted(p for p in base.iterdir() if p.is_file() and p.name.startswith(prefix))
+
+
+def build_assets_from_bundle_dir(
+    tag: str,
+    *,
+    release_type: str,
+    created_at: str,
+    snapshot_dir: Path | None = None,
+) -> list[dict]:
+    """Manifest ``assets`` entries matching on-disk release bundle (same idea as publish-snapshot _tmp scan)."""
+    return [
+        {
+            "name": p.name,
+            "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+            "bytes": p.stat().st_size,
+            "updated_at": created_at,
+            "release_type": release_type,
+        }
+        for p in iter_snapshot_bundle_files(tag, snapshot_dir=snapshot_dir)
+    ]
+
+
 def build_release_entry(
     *,
     tag: str,
@@ -68,6 +99,7 @@ def build_release_entry(
     row_count: int | None = None,
     min_date: str | None = None,
     max_date: str | None = None,
+    assets: list[dict] | None = None,
 ) -> dict:
     return {
         "tag": tag,
@@ -78,7 +110,8 @@ def build_release_entry(
         "created_at": created_at,
         "min_date": min_date,
         "max_date": max_date,
-        "assets": [
+        "assets": assets
+        or [
             {
                 "name": file_name,
                 "sha256": sha256,

@@ -14,7 +14,7 @@ on:
       tag:
         description: "Release tag (e.g. data-snapshot-20260316-1800). For from_latest this is the NEW tag to create"
         required: false
-        default: "data-snapshot-20260317-1338"
+        default: "data-snapshot-20260330-1020"
       release_type:
         description: "Release type: snapshot | full"
         required: true
@@ -22,11 +22,26 @@ on:
       asset_url:
         description: "[Bootstrap only] Parquet URL"
         required: false
-        default: "https://drive.google.com/file/d/1kWG4xA5Sc-_0I41Ut53SW7StVAHHXo7u/view?usp=sharing"
-      sha256:
-        description: "[Bootstrap only] Expected sha256 hex (for data-snapshot-20260317-1338)"
+        default: "https://drive.google.com/file/d/1tpYChlp1yi2mXBTALtmt61yXb5XAhGaR/view?usp=sharing"
+      json_url:
+        description: "[Bootstrap only] Snapshot manifest JSON URL (optional)"
         required: false
-        default: "7043c7b4d678d60aead30d92798c3e75ac155957760c5b6f644e7ec2f2827644"
+        default: "https://drive.google.com/file/d/15LSUtrkSEuUR2_PcZ9m5feR4xtihvJXW/view?usp=sharing"
+      sha256_url:
+        description: "[Bootstrap only] Snapshot sha256 URL (optional)"
+        required: false
+        default: "https://drive.google.com/file/d/1NnI8rU9JLs2v2FhP-NEQCorLyxaSDZPG/view?usp=sharing"
+      ticker_state_url:
+        description: "[Bootstrap only] Companion ticker-state parquet URL (optional)"
+        required: false
+        default: "https://drive.google.com/file/d/1kjUchEK7oEF7kAJsaxmNhCT5tgVZN6ek/view?usp=sharing"
+      output1_latest_url:
+        description: "[Bootstrap only] Companion output1-latest parquet URL (optional)"
+        required: false
+        default: "https://drive.google.com/file/d/1SashtE5LYmTNcBUpT06ZOGfQk0kMK2IZ/view?usp=sharing"
+      sha256:
+        description: "[Bootstrap only] Expected sha256 hex (override; if empty, use sha256 file from sha256_url)"
+        required: false
       min_date:
         description: "Min date in asset (YYYY-MM-DD)"
         required: false
@@ -94,29 +109,51 @@ jobs:
         run: |
           TAG="${{ inputs.tag }}"
           ASSET_URL="${{ inputs.asset_url }}"
-          DEFAULT_TAG="data-snapshot-20260317-1338"
-          DEFAULT_PARQUET_URL="https://drive.google.com/file/d/1kWG4xA5Sc-_0I41Ut53SW7StVAHHXo7u/view?usp=sharing"
+          DEFAULT_TAG="data-snapshot-20260330-1020"
+          DEFAULT_PARQUET_URL="https://drive.google.com/file/d/1tpYChlp1yi2mXBTALtmt61yXb5XAhGaR/view?usp=sharing"
           if [ -z "${ASSET_URL}" ] && [ "${TAG}" = "${DEFAULT_TAG}" ]; then
             echo "Using default asset_url for tag ${DEFAULT_TAG}"
             echo "asset_url=${DEFAULT_PARQUET_URL}" >> $GITHUB_OUTPUT
           else
             echo "asset_url=${ASSET_URL}" >> $GITHUB_OUTPUT
           fi
-          echo "sha256=${{ inputs.sha256 }}" >> $GITHUB_OUTPUT
 
       - name: Download asset from URL (bootstrap)
         if: inputs.mode == 'bootstrap'
         env:
           ASSET_URL: ${{ steps.bootstrap_defaults.outputs.asset_url }}
+          JSON_URL: ${{ inputs.json_url }}
+          SHA256_URL: ${{ inputs.sha256_url }}
+          TICKER_STATE_URL: ${{ inputs.ticker_state_url }}
+          OUTPUT1_LATEST_URL: ${{ inputs.output1_latest_url }}
           ASSET_NAME: ${{ inputs.asset_name }}
           TAG: ${{ inputs.tag }}
           STAGING_AUTH_HEADER: ${{ secrets.STAGING_AUTH_HEADER }}
         run: |
           set -euo pipefail
           mkdir -p _tmp
+          download_one() {
+            local url="$1"
+            local dest="$2"
+            if [ -z "$url" ]; then
+              return 0
+            fi
+            if echo "$url" | grep -q 'drive\.google\.com'; then
+              echo "Downloading from Google Drive -> $dest"
+              python3 -m pip install -q gdown
+              gdown "$url" -O "$dest" --fuzzy
+            else
+              echo "Downloading public URL -> $dest"
+              if [ -n "${STAGING_AUTH_HEADER:-}" ]; then
+                curl -L --fail -H "${STAGING_AUTH_HEADER}" -o "$dest" "$url"
+              else
+                curl -L --fail -o "$dest" "$url"
+              fi
+            fi
+          }
           url="${ASSET_URL}"
           if [ -z "$url" ]; then
-            echo "Bootstrap mode requires asset_url (or use tag data-snapshot-20260317-1338 for default URL)"
+            echo "Bootstrap mode requires asset_url (or leave defaults: tag data-snapshot-20260330-1020 + Drive URLs)"
             exit 1
           fi
           fname="${ASSET_NAME}"
@@ -150,6 +187,10 @@ jobs:
             fi
           fi
           echo "$fname" > _tmp/asset_name.txt
+          download_one "${JSON_URL}" "_tmp/${TAG}.json"
+          download_one "${SHA256_URL}" "_tmp/${TAG}.sha256"
+          download_one "${TICKER_STATE_URL}" "_tmp/${TAG}.ticker-state.parquet"
+          download_one "${OUTPUT1_LATEST_URL}" "_tmp/${TAG}.output1-latest.parquet"
 
       - name: Download latest release and prepare re-release
         if: inputs.mode == 'from_latest'
@@ -203,11 +244,15 @@ jobs:
           PY
             fi
           else
-            if [ -z "${{ inputs.sha256 }}" ]; then
-              echo "Bootstrap mode requires sha256 input"
+            if [ -n "${{ inputs.sha256 }}" ]; then
+              echo "expected=${{ inputs.sha256 }}" >> $GITHUB_OUTPUT
+            elif [ -f "_tmp/${{ inputs.tag }}.sha256" ]; then
+              v=$(awk 'NF {print $1; exit}' "_tmp/${{ inputs.tag }}.sha256" | tr -d '\n\r')
+              echo "expected=$v" >> $GITHUB_OUTPUT
+            else
+              echo "Bootstrap mode needs sha256 input or sha256_url so _tmp/${{ inputs.tag }}.sha256 exists"
               exit 1
             fi
-            echo "expected=${{ inputs.sha256 }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Verify sha256
@@ -234,13 +279,22 @@ jobs:
             gh release create "$TAG" -t "$TAG" -n "${RELEASE_TYPE^} dataset: $TAG"
           fi
 
-      - name: Upload release asset
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          fname="$(cat _tmp/asset_name.txt)"
-          gh release upload "$TAG" "_tmp/$fname" --clobber
+          set -euo pipefail
+          for f in _tmp/*; do
+            base="$(basename "$f")"
+            case "$base" in
+              asset_name.txt|expected_sha256.txt)
+                continue
+                ;;
+            esac
+            [ -f "$f" ] || continue
+            gh release upload "$TAG" "$f" --clobber
+          done
 
       - name: Ensure manifest file
         run: |
@@ -257,7 +311,7 @@ jobs:
           ROW_COUNT: ${{ inputs.row_count }}
         run: |
           python3 - << 'PY'
-          import json, os
+          import hashlib, json, os
           from datetime import datetime
           from pathlib import Path
           import sys
@@ -281,6 +335,17 @@ jobs:
           fname = Path("_tmp/asset_name.txt").read_text(encoding="utf-8").strip()
           bytes_ = Path("_tmp", fname).stat().st_size
           created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+          assets = []
+          for p in sorted(Path("_tmp").iterdir()):
+              if not p.is_file() or p.name in {"asset_name.txt", "expected_sha256.txt"}:
+                  continue
+              assets.append({
+                  "name": p.name,
+                  "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                  "bytes": p.stat().st_size,
+                  "updated_at": created_at,
+                  "release_type": release_type,
+              })
           entry = build_release_entry(
             tag=tag,
             release_type=release_type,
@@ -291,6 +356,7 @@ jobs:
             row_count=int(row_count) if row_count else None,
             min_date=min_date,
             max_date=max_date,
+            assets=assets,
           )
           m = update_manifest_payload(m, entry)
           path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
