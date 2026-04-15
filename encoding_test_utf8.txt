@@ -1,0 +1,2 @@
+UTF-8 test (no BOM). If you can read this line in the editor, file encoding is OK.
+안녕하세요. 한글 표시 테스트입니다.

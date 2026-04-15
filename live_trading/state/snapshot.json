@@ -1,0 +1,71 @@
+{
+  "event_count": 300,
+  "cash": 99989416.0,
+  "positions": {
+    "051910": {
+      "symbol": "051910",
+      "status": "LONG",
+      "qty": 94,
+      "avg_price": 52951.0,
+      "entry_time": "2026-04-09T04:35:54.984229+00:00",
+      "highest_price": 53055.441321195074,
+      "stop_price": 48714.6696270989,
+      "last_signal_reason": "entry_ma_volume",
+      "last_order_id": "MOCK-B12A93231760",
+      "realized_pnl": 0.0,
+      "unrealized_pnl": -41338.63698422308
+    },
+    "035420": {
+      "symbol": "035420",
+      "status": "PENDING_SELL",
+      "qty": 96,
+      "avg_price": 51916.0,
+      "entry_time": "2026-04-09T04:35:55.084390+00:00",
+      "highest_price": 51986.84430815851,
+      "stop_price": 47762.58708403064,
+      "last_signal_reason": "ma20_break",
+      "last_order_id": "pending",
+      "realized_pnl": 0.0,
+      "unrealized_pnl": 6801.053583216621
+    },
+    "006400": {
+      "symbol": "006400",
+      "status": "LONG",
+      "qty": 92,
+      "avg_price": 53917.0,
+      "entry_time": "2026-04-09T04:35:55.307150+00:00",
+      "highest_price": 54041.99572101637,
+      "stop_price": 49603.18247747295,
+      "last_signal_reason": "entry_ma_volume",
+      "last_order_id": "MOCK-63AC69EBC700",
+      "realized_pnl": 0.0,
+      "unrealized_pnl": -3312.772389446094
+    },
+    "005930": {
+      "symbol": "005930",
+      "status": "FLAT",
+      "qty": 0,
+      "avg_price": 0.0,
+      "entry_time": null,
+      "highest_price": 0.0,
+      "stop_price": null,
+      "last_signal_reason": "ma20_break",
+      "last_order_id": "MOCK-854AA93CAE1A",
+      "realized_pnl": -36531.0,
+      "unrealized_pnl": -36568.378166326096
+    },
+    "000660": {
+      "symbol": "000660",
+      "status": "FLAT",
+      "qty": 0,
+      "avg_price": 0.0,
+      "entry_time": null,
+      "highest_price": 0.0,
+      "stop_price": null,
+      "last_signal_reason": "ma20_break",
+      "last_order_id": "MOCK-E5C253265A85",
+      "realized_pnl": -10584.0,
+      "unrealized_pnl": -10548.65242173789
+    }
+  }
+}

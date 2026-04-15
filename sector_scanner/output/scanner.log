@@ -1,0 +1,243 @@
+2026-04-10 08:31:07,118 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:31:10,170 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult → C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:31:10,173 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:31:21,011 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:31:21,204 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:31:21,262 | INFO | sector_scanner | refresh_realtime captured 5 events
+2026-04-10 08:31:21,263 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:33:03,207 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:33:03,375 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:33:03,431 | INFO | sector_scanner | refresh_realtime captured 5 events
+2026-04-10 08:33:03,436 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:33:45,844 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:33:46,012 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:33:46,016 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:33:54,189 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:33:54,357 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:33:54,411 | INFO | sector_scanner | refresh_realtime captured 5 events
+2026-04-10 08:33:54,417 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:40:55,097 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:40:55,274 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:40:55,344 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=3 adjusted_scores=6 leader_groups=2
+2026-04-10 08:40:55,362 | INFO | sector_scanner | Universe export written: C:\_WORK2\Sauvignon\sector_scanner\output\scanner_universe.json (6 symbols)
+2026-04-10 08:40:55,362 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:41:00,514 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:41:00,682 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:41:00,687 | INFO | sector_scanner | Universe export written: C:\_WORK2\Sauvignon\sector_scanner\output\scanner_universe.json (6 symbols)
+2026-04-10 08:41:00,688 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:45:58,825 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:45:59,004 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:45:59,069 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=3 adjusted_scores=6 leader_groups=2
+2026-04-10 08:45:59,088 | INFO | sector_scanner | Universe export written: C:\_WORK2\Sauvignon\sector_scanner\output\scanner_universe.json (6 symbols)
+2026-04-10 08:45:59,088 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:50:28,390 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:50:28,391 | INFO | sector_scanner | Continuous loop: full_scan every 180.0s, tick refresh every 5.0s (max_events=20)
+2026-04-10 08:50:28,570 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:50:28,643 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=3 adjusted_scores=6 leader_groups=2
+2026-04-10 08:50:33,721 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:50:38,806 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:50:43,897 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:50:49,006 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:50:54,109 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:50:59,212 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:51:04,323 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:51:09,436 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:51:12,535 | INFO | sector_scanner | Continuous loop stopped by user (KeyboardInterrupt).
+2026-04-10 08:51:12,536 | INFO | sector_scanner | Done (loop). state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:54:06,332 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:54:06,509 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:54:09,442 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 08:54:09,443 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:54:14,296 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:54:14,466 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:54:14,563 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:54:15,151 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 08:54:15,151 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:57:48,725 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 08:57:48,726 | INFO | sector_scanner | Continuous loop: full_scan every 180.0s, tick refresh every 5.0s (max_events=20)
+2026-04-10 08:57:48,896 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 08:57:49,481 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 08:57:49,551 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=3 adjusted_scores=6 leader_groups=2
+2026-04-10 08:57:54,729 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:57:59,906 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:05,078 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:10,259 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:15,442 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:20,629 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:25,862 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:31,094 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:36,314 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:41,573 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:46,793 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:52,013 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:58:57,210 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:02,427 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:07,654 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:12,877 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:18,076 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:23,302 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:28,522 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:33,751 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:38,976 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:44,209 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:49,439 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:54,671 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 08:59:59,899 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:05,145 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:10,399 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:15,630 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:20,898 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:26,155 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:31,404 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:36,661 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:41,911 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:47,174 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:52,317 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:00:52,425 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 09:00:52,562 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:00:57,817 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:03,092 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:08,347 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:13,677 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:18,929 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:24,206 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:29,485 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:34,772 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:40,034 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:45,352 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:50,616 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:01:55,950 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:01,231 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:06,528 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:11,805 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:17,081 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:22,359 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:27,662 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:32,949 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:38,237 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:43,517 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:48,820 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:54,131 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:02:59,435 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:03:04,886 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:03:10,280 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:03:15,612 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:03:20,917 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:03:26,205 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=6 leader_groups=2
+2026-04-10 09:03:28,613 | INFO | sector_scanner | Continuous loop stopped by user (KeyboardInterrupt).
+2026-04-10 09:03:28,614 | INFO | sector_scanner | Done (loop). state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:52:03,911 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 09:52:24,904 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:52:24,905 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:52:31,894 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 09:52:32,731 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:52:32,732 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:56:24,506 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 09:56:29,363 | INFO | sector_scanner | Continuous loop: full_scan every 180.0s, tick refresh every 5.0s (max_events=20)
+2026-04-10 09:56:32,180 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 09:56:33,012 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 09:56:33,115 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=5 adjusted_scores=53 leader_groups=5
+2026-04-10 09:56:38,499 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=7 adjusted_scores=53 leader_groups=5
+2026-04-10 09:56:43,874 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=53 leader_groups=5
+2026-04-10 09:56:49,230 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=10 adjusted_scores=53 leader_groups=5
+2026-04-10 09:56:53,586 | INFO | sector_scanner | Continuous loop stopped by user (KeyboardInterrupt).
+2026-04-10 09:56:53,587 | INFO | sector_scanner | Done (loop). state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:00:41,326 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 10:00:48,814 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:00:48,816 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:00:56,705 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 10:00:57,555 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:00:57,556 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:01:15,497 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 10:01:16,322 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:01:16,323 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:01:20,990 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 10:01:21,877 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:01:21,878 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:35:40,117 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 10:35:44,776 | INFO | sector_scanner | Continuous loop: full_scan every 180.0s, tick refresh every 5.0s (max_events=20)
+2026-04-10 10:35:47,511 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 10:35:48,330 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 10:35:48,407 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=5 adjusted_scores=53 leader_groups=5
+2026-04-10 10:35:53,819 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=7 adjusted_scores=53 leader_groups=5
+2026-04-10 10:35:59,196 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=53 leader_groups=5
+2026-04-10 10:36:04,573 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=10 adjusted_scores=53 leader_groups=5
+2026-04-10 10:36:09,946 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=12 adjusted_scores=53 leader_groups=5
+2026-04-10 10:36:14,725 | INFO | sector_scanner | Continuous loop stopped by user (KeyboardInterrupt).
+2026-04-10 10:36:14,726 | INFO | sector_scanner | Done (loop). state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 15:27:09,561 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 15:27:32,017 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 15:27:35,992 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 15:27:35,992 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 15:27:42,380 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 15:27:49,833 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 15:27:50,588 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 15:27:50,589 | INFO | sector_scanner | Done. state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 15:59:23,741 | INFO | sector_scanner | Starting scanner mode=mock
+2026-04-10 15:59:28,406 | INFO | sector_scanner | Continuous loop: full_scan every 180.0s, tick refresh every 5.0s (max_events=20)
+2026-04-10 15:59:31,573 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 15:59:32,386 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 15:59:32,474 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=2 adjusted_scores=41 leader_groups=3
+2026-04-10 15:59:37,815 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=5 adjusted_scores=41 leader_groups=3
+2026-04-10 15:59:43,130 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=6 adjusted_scores=41 leader_groups=3
+2026-04-10 15:59:48,448 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=7 adjusted_scores=41 leader_groups=3
+2026-04-10 15:59:53,774 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=7 adjusted_scores=41 leader_groups=3
+2026-04-10 15:59:59,097 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=7 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:04,434 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:09,781 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:15,109 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:20,430 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:25,754 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:31,093 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:36,429 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:41,768 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:47,104 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:52,453 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:00:57,803 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:03,137 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:08,499 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:13,847 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:19,194 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:24,545 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:29,898 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:35,247 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:40,604 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:45,968 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:51,346 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:01:56,720 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:02,100 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:07,491 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:12,871 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:18,247 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:23,684 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:29,068 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=9 adjusted_scores=41 leader_groups=3
+2026-04-10 16:02:35,128 | INFO | sector_scanner.scanner_state | ScannerStateStore saved ScanResult to C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json
+2026-04-10 16:02:35,390 | INFO | sector_scanner | Score chart updated: C:\_WORK2\Sauvignon\sector_scanner\output\score_history.html
+2026-04-10 16:02:35,510 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=14 adjusted_scores=42 leader_groups=3
+2026-04-10 16:02:40,913 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=17 adjusted_scores=42 leader_groups=3
+2026-04-10 16:02:46,332 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:02:51,732 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:02:57,142 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:02,548 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:07,964 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:13,364 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:18,775 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:24,209 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:29,627 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:35,062 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:40,480 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:45,918 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:51,377 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:03:56,873 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:02,317 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:07,753 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:13,204 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:18,648 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:24,221 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:29,652 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:35,109 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:40,539 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:45,992 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:51,444 | INFO | sector_scanner | refresh_realtime: events=5 buffer_symbols=18 adjusted_scores=42 leader_groups=3
+2026-04-10 16:04:56,096 | INFO | sector_scanner | Continuous loop stopped by user (KeyboardInterrupt).
+2026-04-10 16:04:56,098 | INFO | sector_scanner | Done (loop). state_file=C:\_WORK2\Sauvignon\sector_scanner\output\scanner_state.json

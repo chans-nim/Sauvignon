@@ -1,0 +1,11 @@
+{
+  "trading_date": "2026-04-09",
+  "new_entries": 5,
+  "blocked_by_loss": false,
+  "last_exit_ts": {
+    "005930": "2026-04-09T13:36:46.183268+09:00",
+    "000660": "2026-04-09T13:42:42.716323+09:00"
+  },
+  "start_equity": 100000000.0,
+  "consecutive_losing_entries": 0
+}

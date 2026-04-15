@@ -1,0 +1,86 @@
+2026-04-09 13:34:56,243 [INFO] run_live_trader: Starting mock live trader demo max_events=300
+2026-04-09 13:34:56,244 [INFO] mock_broker: MockBroker connected.
+2026-04-09 13:34:56,244 [INFO] run_live_trader: LiveTrader initialized mode=mock symbols=['005930', '000660', '035420', '051910', '006400']
+2026-04-09 13:34:59,473 [INFO] run_live_trader: Rolled daily stats to 2026-04-09
+2026-04-09 13:35:02,078 [INFO] mock_broker: MockBroker disconnected.
+2026-04-09 13:35:02,079 [INFO] run_live_trader: LiveTrader shutdown complete events=300
+2026-04-09 13:35:02,088 [INFO] run_live_trader: Snapshot keys: ['event_count', 'cash', 'positions']
+2026-04-09 13:35:39,800 [INFO] run_live_trader: Starting mock live trader demo max_events=300
+2026-04-09 13:35:39,800 [INFO] mock_broker: MockBroker connected.
+2026-04-09 13:35:39,801 [INFO] run_live_trader: LiveTrader initialized mode=mock symbols=['005930', '000660', '035420', '051910', '006400']
+2026-04-09 13:35:39,810 [INFO] run_live_trader: Daily stats restored keys=['trading_date', 'new_entries', 'blocked_by_loss', 'last_exit_ts', 'start_equity']
+2026-04-09 13:35:39,832 [INFO] mock_broker: MockBroker disconnected.
+2026-04-09 13:35:39,832 [INFO] run_live_trader: LiveTrader shutdown complete events=0
+2026-04-09 13:35:53,179 [INFO] run_live_trader: Starting mock live trader demo max_events=300
+2026-04-09 13:35:53,180 [INFO] mock_broker: MockBroker connected.
+2026-04-09 13:35:53,180 [INFO] run_live_trader: LiveTrader initialized mode=mock symbols=['005930', '000660', '035420', '051910', '006400']
+2026-04-09 13:35:53,183 [INFO] run_live_trader: Daily stats restored keys=['trading_date', 'new_entries', 'blocked_by_loss', 'last_exit_ts', 'start_equity']
+2026-04-09 13:35:54,982 [INFO] position_manager: mark_pending_buy 051910 order=pending
+2026-04-09 13:35:54,984 [INFO] mock_broker: Mock FILL BUY 051910 94 @ 52951.0
+2026-04-09 13:35:54,984 [INFO] run_live_trader: Order submitted id=MOCK-B12A93231760 sym=051910 side=BUY status=FILLED
+2026-04-09 13:35:54,984 [INFO] position_manager: mark_pending_buy 051910 order=MOCK-B12A93231760
+2026-04-09 13:35:54,984 [INFO] position_manager: apply_fill BUY 051910 qty=94 avg=52951.0
+2026-04-09 13:35:54,985 [INFO] run_live_trader: Entry filled 051910 qty=94 score=0.33892642924083854 stop=48714.6696270989
+2026-04-09 13:35:55,083 [INFO] position_manager: mark_pending_buy 035420 order=pending
+2026-04-09 13:35:55,084 [INFO] mock_broker: Mock FILL BUY 035420 96 @ 51916.0
+2026-04-09 13:35:55,084 [INFO] run_live_trader: Order submitted id=MOCK-150F658CB286 sym=035420 side=BUY status=FILLED
+2026-04-09 13:35:55,084 [INFO] position_manager: mark_pending_buy 035420 order=MOCK-150F658CB286
+2026-04-09 13:35:55,085 [INFO] position_manager: apply_fill BUY 035420 qty=96 avg=51916.0
+2026-04-09 13:35:55,085 [INFO] run_live_trader: Entry filled 035420 qty=96 score=0.3370075006772107 stop=47762.58708403064
+2026-04-09 13:35:55,306 [INFO] position_manager: mark_pending_buy 006400 order=pending
+2026-04-09 13:35:55,307 [INFO] mock_broker: Mock FILL BUY 006400 92 @ 53917.0
+2026-04-09 13:35:55,307 [INFO] run_live_trader: Order submitted id=MOCK-63AC69EBC700 sym=006400 side=BUY status=FILLED
+2026-04-09 13:35:55,307 [INFO] position_manager: mark_pending_buy 006400 order=MOCK-63AC69EBC700
+2026-04-09 13:35:55,307 [INFO] position_manager: apply_fill BUY 006400 qty=92 avg=53917.0
+2026-04-09 13:35:55,307 [INFO] run_live_trader: Entry filled 006400 qty=92 score=0.37592112286786633 stop=49603.18247747295
+2026-04-09 13:35:55,335 [INFO] position_manager: mark_pending_buy 005930 order=pending
+2026-04-09 13:35:55,335 [INFO] mock_broker: Mock FILL BUY 005930 99 @ 50452.0
+2026-04-09 13:35:55,335 [INFO] run_live_trader: Order submitted id=MOCK-80BE10702661 sym=005930 side=BUY status=FILLED
+2026-04-09 13:35:55,335 [INFO] position_manager: mark_pending_buy 005930 order=MOCK-80BE10702661
+2026-04-09 13:35:55,336 [INFO] position_manager: apply_fill BUY 005930 qty=99 avg=50452.0
+2026-04-09 13:35:55,336 [INFO] run_live_trader: Entry filled 005930 qty=99 score=0.3177505114474995 stop=46415.47602306698
+2026-04-09 13:36:01,593 [INFO] position_manager: mark_pending_sell 005930 order=pending
+2026-04-09 13:36:01,593 [INFO] mock_broker: Mock FILL SELL 005930 99 @ 50083.0
+2026-04-09 13:36:01,593 [INFO] run_live_trader: Order submitted id=MOCK-854AA93CAE1A sym=005930 side=SELL status=FILLED
+2026-04-09 13:36:01,594 [INFO] position_manager: mark_pending_sell 005930 order=MOCK-854AA93CAE1A
+2026-04-09 13:36:01,594 [INFO] position_manager: apply_fill SELL 005930 remaining=0 pnl_slice=-36531.0
+2026-04-09 13:36:01,594 [INFO] run_live_trader: Signal exit filled 005930 reason=ma20_break
+2026-04-09 13:36:02,882 [INFO] mock_broker: MockBroker disconnected.
+2026-04-09 13:36:02,883 [INFO] run_live_trader: LiveTrader shutdown complete events=300
+2026-04-09 13:36:02,892 [INFO] run_live_trader: Snapshot keys: ['event_count', 'cash', 'positions']
+2026-04-09 13:42:14,712 [INFO] run_live_trader: Starting mock live trader demo max_events=300
+2026-04-09 13:42:14,712 [INFO] mock_broker: MockBroker connected.
+2026-04-09 13:42:14,712 [INFO] run_live_trader: LiveTrader initialized mode=mock symbols=['005930', '000660', '035420', '051910', '006400']
+2026-04-09 13:42:14,714 [INFO] position_manager: load_positions count=4
+2026-04-09 13:42:14,715 [INFO] run_live_trader: State restore: 4 positions
+2026-04-09 13:42:14,716 [INFO] run_live_trader: Daily stats restored keys=['trading_date', 'new_entries', 'blocked_by_loss', 'last_exit_ts', 'start_equity']
+2026-04-09 13:42:14,808 [INFO] position_manager: mark_pending_sell 035420 order=pending
+2026-04-09 13:42:14,808 [WARNING] mock_broker: Mock reject SELL 035420: qty 96 > held 0
+2026-04-09 13:42:14,809 [INFO] run_live_trader: Order submitted id=MOCK-566DA03E70C1 sym=035420 side=SELL status=REJECTED
+2026-04-09 13:42:14,809 [WARNING] run_live_trader: Exit order rejected 035420 insufficient_position
+2026-04-09 13:42:16,578 [INFO] position_manager: mark_pending_buy 000660 order=pending
+2026-04-09 13:42:16,579 [INFO] mock_broker: Mock FILL BUY 000660 98 @ 50955.0
+2026-04-09 13:42:16,579 [INFO] run_live_trader: Order submitted id=MOCK-DC5C8B3B9EEC sym=000660 side=BUY status=FILLED
+2026-04-09 13:42:16,579 [INFO] position_manager: mark_pending_buy 000660 order=MOCK-DC5C8B3B9EEC
+2026-04-09 13:42:16,579 [INFO] position_manager: apply_fill BUY 000660 qty=98 avg=50955.0
+2026-04-09 13:42:16,580 [INFO] run_live_trader: Entry filled 000660 qty=98 score=0.32200007333377495 stop=46878.34200520777
+2026-04-09 13:42:18,991 [INFO] position_manager: mark_pending_sell 000660 order=pending
+2026-04-09 13:42:18,992 [INFO] mock_broker: Mock FILL SELL 000660 98 @ 50847.0
+2026-04-09 13:42:18,992 [INFO] run_live_trader: Order submitted id=MOCK-E5C253265A85 sym=000660 side=SELL status=FILLED
+2026-04-09 13:42:18,992 [INFO] position_manager: mark_pending_sell 000660 order=MOCK-E5C253265A85
+2026-04-09 13:42:18,992 [INFO] position_manager: apply_fill SELL 000660 remaining=0 pnl_slice=-10584.0
+2026-04-09 13:42:18,993 [INFO] run_live_trader: Signal exit filled 000660 reason=ma20_break
+2026-04-09 13:42:23,551 [INFO] mock_broker: MockBroker disconnected.
+2026-04-09 13:42:23,552 [INFO] run_live_trader: LiveTrader shutdown complete events=300
+2026-04-09 13:42:23,560 [INFO] run_live_trader: Snapshot keys: ['event_count', 'cash', 'positions']
+2026-04-09 13:42:56,616 [INFO] run_live_trader: Starting mock live trader demo max_events=300
+2026-04-09 13:42:56,617 [INFO] mock_broker: MockBroker connected.
+2026-04-09 13:42:56,617 [INFO] run_live_trader: LiveTrader initialized mode=mock symbols=['005930', '000660', '035420', '051910', '006400']
+2026-04-09 13:42:56,619 [INFO] position_manager: load_positions count=5
+2026-04-09 13:42:56,620 [INFO] run_live_trader: State restore: 5 positions
+2026-04-09 13:42:56,620 [INFO] mock_broker: MockBroker hydrate_ledger cash=99989416.0 positions={'051910': 94, '006400': 92}
+2026-04-09 13:42:56,620 [INFO] run_live_trader: Broker ledger hydrated from snapshot (long symbols=2)
+2026-04-09 13:42:56,621 [INFO] run_live_trader: Daily stats restored keys=['trading_date', 'new_entries', 'blocked_by_loss', 'last_exit_ts', 'start_equity', 'consecutive_losing_entries']
+2026-04-09 13:43:04,933 [INFO] mock_broker: MockBroker disconnected.
+2026-04-09 13:43:04,933 [INFO] run_live_trader: LiveTrader shutdown complete events=300
+2026-04-09 13:43:04,935 [INFO] run_live_trader: Snapshot keys: ['event_count', 'cash', 'positions']

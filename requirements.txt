@@ -1,8 +1,12 @@
 pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
 requests>=2.31.0
 duckdb>=1.0.0
 pyarrow>=15.0.0
 python-dotenv>=1.0.1
+PyYAML>=6.0.0
 matplotlib>=3.8.0
+plotly>=5.18.0
 pytest
 gdown>=5.0.0
