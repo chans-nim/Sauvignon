@@ -62,6 +62,10 @@ def _coerce_output_list(payload: dict[str, Any], *keys: str) -> list[dict[str, A
 def _norm_stock_quote(out0: dict[str, Any]) -> dict[str, Any]:
     u = _upper_map(out0)
     price = _pick(u, "STCK_PRPR", "PRPR", "STCK_CLPR")
+    prev_close = _to_float(_pick(u, "STCK_PRDY_CLPR", "PRDY_CLPR"))
+    return_pct = _to_float(_pick(u, "PRDY_CTRT", "FLUC_RT", "CTRT"))
+    if abs(return_pct) > 0.35:
+        return_pct = return_pct / 100.0
     return {
         "symbol": str(_pick(u, "MKSC_SHRN_ISCD", "ISCD") or "").strip(),
         "name": str(_pick(u, "HTS_KOR_ISNM", "PRDT_NAME") or "").strip(),
@@ -70,6 +74,8 @@ def _norm_stock_quote(out0: dict[str, Any]) -> dict[str, Any]:
         "high": _to_float(_pick(u, "STCK_HGPR", "HGPR")),
         "low": _to_float(_pick(u, "STCK_LWPR", "LWPR")),
         "close": _to_float(_pick(u, "STCK_CLPR", "STCK_PRPR")),
+        "previous_close": prev_close,
+        "return_pct": return_pct,
         "volume": _to_float(_pick(u, "ACML_VOL", "CNTG_VOL")),
         "value_traded": _to_float(_pick(u, "ACML_TR_PBMN", "PBMN")),
     }

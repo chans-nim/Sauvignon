@@ -18,11 +18,13 @@ import json
 import mimetypes
 import os
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib import parse, request
+from urllib.error import URLError
 from zoneinfo import ZoneInfo
 
 try:
@@ -528,11 +530,29 @@ def _build_telegram_summary(rows: list[dict[str, Any]], *, top_k: int = 5) -> st
     return "\n".join(lines)
 
 
-def _http_post(url: str, data: bytes, headers: dict[str, str]) -> dict[str, Any]:
-    req = request.Request(url, data=data, headers=headers, method="POST")
-    with request.urlopen(req, timeout=60) as resp:
-        body = resp.read().decode("utf-8")
-    return json.loads(body)
+def _http_post(
+    url: str,
+    data: bytes,
+    headers: dict[str, str],
+    *,
+    timeout_seconds: float = 120.0,
+    retries: int = 2,
+    backoff_seconds: float = 2.0,
+) -> dict[str, Any]:
+    last_error: Exception | None = None
+    attempts = max(1, int(retries) + 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            req = request.Request(url, data=data, headers=headers, method="POST")
+            with request.urlopen(req, timeout=timeout_seconds) as resp:
+                body = resp.read().decode("utf-8")
+            return json.loads(body)
+        except (TimeoutError, OSError, URLError, ValueError) as exc:
+            last_error = exc
+            if attempt >= attempts:
+                break
+            time.sleep(backoff_seconds * attempt)
+    raise RuntimeError(f"HTTP POST failed after {attempts} attempts: {last_error}") from last_error
 
 
 def _telegram_api_url(bot_token: str, method: str) -> str:
@@ -1058,14 +1078,17 @@ def main() -> None:
                     "--telegram 사용 시 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID_STOCK 환경변수 또는 "
                     "--telegram-bot-token / --telegram-chat-id 인자가 필요합니다."
                 )
-            _send_telegram_report_bundle(
-                overview,
-                html_path=html_path,
-                bot_token=bot_token,
-                chat_id=chat_id,
-                thread_id=thread_id,
-            )
-            print("Telegram report sent.")
+            try:
+                _send_telegram_report_bundle(
+                    overview,
+                    html_path=html_path,
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                )
+                print("Telegram report sent.")
+            except Exception as exc:
+                print(f"WARNING: Telegram send failed: {exc}", file=sys.stderr)
     elif args.telegram:
         raise SystemExit("--telegram 은 --all-sectors 와 함께 사용해야 합니다.")
 
