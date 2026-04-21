@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .fixed_sector_map import attach_fixed_sector
 from .intraday_loader import IntradayLoader
-from .kis_client import KISClient
+from .kis_client import KISClient, build_kis_client_for_mode
 from .mock_client import MockClient
 from .ranking_loader import RankingLoader
 from .scanner_config import ScannerConfig
@@ -133,10 +133,8 @@ def build_components(cfg: ScannerConfig, log: logging.Logger):
             client = MockClient(seed=7, n_stocks=12, n_groups=3)
         client.authenticate()
     elif cfg.mode in ("paper", "real"):
-        raise NotImplementedError(
-            "paper/real mode is not wired yet. "
-            "Use mock mode or implement KISClient first."
-        )
+        client = build_kis_client_for_mode(cfg.mode)
+        client.authenticate()
     else:
         raise ValueError(f"Unknown mode {cfg.mode!r}")
 

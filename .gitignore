@@ -21,6 +21,7 @@ venv/
 /reports/
 /reports_test/
 /reports_test2/
+/sector_scanner/output/
 /report_*.txt
 /chart_*.png
 /release_validation_report*.md
