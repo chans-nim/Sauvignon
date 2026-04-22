@@ -44,7 +44,7 @@ def test_build_thema_rows_and_render_html() -> None:
     quotes = {
         "005930": {"price": 219000, "return_pct": 0.021, "value_traded": 364_619_000_000, "volume": 16_705_245},
         "000660": {"price": 1224000, "return_pct": 0.0497, "value_traded": 2_800_000_000_000, "volume": 2_300_000},
-        "042700": {"price": 295000, "return_pct": 0.0279, "value_traded": 150_000_000_000, "volume": 500_000},
+        "042700": {"price": 295000, "return_pct": -0.0279, "value_traded": 150_000_000_000, "volume": 500_000},
     }
 
     major_blueprints, middle_blueprints = _build_group_blueprints(data)
@@ -76,3 +76,5 @@ def test_build_thema_rows_and_render_html() -> None:
     assert 'href="https://finance.naver.com/item/main.naver?code=005930"' in html
     assert "대분류 Leaderboard" in html
     assert "<details" in html
+    assert 'class="pos"' in html
+    assert 'class="neg"' in html

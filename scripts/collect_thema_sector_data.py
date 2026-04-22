@@ -440,6 +440,19 @@ def _render_leaderboard_html(rows: list[dict[str, Any]], *, title: str, open_by_
     return "".join(parts)
 
 
+def _sign_class(value: Any) -> str:
+    v = _safe_float(value, 0.0)
+    if v > 0:
+        return "pos"
+    if v < 0:
+        return "neg"
+    return "neutral"
+
+
+def _signed_value_html(text: str, sign_value: Any) -> str:
+    return f"<span class=\"{_sign_class(sign_value)}\">{_escape_html(text)}</span>"
+
+
 def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_default: bool) -> str:
     open_attr = " open" if open_by_default else ""
     parts = [f"<details class=\"section fold\"{open_attr}><summary class=\"section-title\">{_escape_html(title)}</summary><div class=\"grid\">"]
@@ -468,32 +481,36 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
         parts.append("<div class=\"card-body\">")
         parts.append("<div class=\"metrics\">")
         metric_pairs = [
-            ("시총가중 RS", a.get("weighted_rs")),
-            ("평균 RS", a.get("avg_rs")),
-            ("RS80+ 비중", _fmt_pct(_safe_float(a.get("high_rs_ratio"), 0.0) / 100.0)),
-            ("RS60+ 비중", _fmt_pct(_safe_float(a.get("strong_rs_ratio"), 0.0) / 100.0)),
-            ("시총합(억)", _fmt_num(a.get("market_cap_total_eok"))),
+            ("시총가중 RS", a.get("weighted_rs"), None),
+            ("평균 RS", a.get("avg_rs"), None),
+            ("RS80+ 비중", _fmt_pct(_safe_float(a.get("high_rs_ratio"), 0.0) / 100.0), None),
+            ("RS60+ 비중", _fmt_pct(_safe_float(a.get("strong_rs_ratio"), 0.0) / 100.0), None),
+            ("시총합(억)", _fmt_num(a.get("market_cap_total_eok")), None),
             (
                 "대표 당일 평균",
                 _fmt_pct(_safe_float(a.get("top_members_avg_return_pct"), 0.0) / 100.0)
                 if a.get("top_members_avg_return_pct") is not None
                 else "-",
+                a.get("top_members_avg_return_pct"),
             ),
             (
                 "대표 상승 비중",
                 _fmt_pct(_safe_float(a.get("top_members_positive_ratio"), 0.0) / 100.0)
                 if a.get("top_members_positive_ratio") is not None
                 else "-",
+                None,
             ),
             (
                 "대표 거래쏠림",
                 _fmt_pct(_safe_float(a.get("top_member_value_share_pct"), 0.0) / 100.0)
                 if a.get("top_member_value_share_pct") is not None
                 else "-",
+                None,
             ),
         ]
-        for label, value in metric_pairs:
-            parts.append(f"<div class=\"metric\"><div class=\"k\">{_escape_html(label)}</div><div class=\"v\">{_escape_html(value)}</div></div>")
+        for label, value, sign_value in metric_pairs:
+            value_html = _signed_value_html(str(value), sign_value) if sign_value is not None and value != "-" else _escape_html(value)
+            parts.append(f"<div class=\"metric\"><div class=\"k\">{_escape_html(label)}</div><div class=\"v\">{value_html}</div></div>")
         parts.append("</div>")
         signals = list(a.get("leader_signals") or [])
         if signals:
@@ -511,8 +528,8 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
                 f"<td><a href=\"{_escape_html(url)}\" target=\"_blank\" rel=\"noopener noreferrer\">{_escape_html(m.get('symbol', '-'))}</a></td>"
                 f"<td>{_escape_html(m.get('thema_rs', '-'))}</td>"
                 f"<td>{_fmt_num(m.get('market_cap_eok'))}</td>"
-                f"<td>{_fmt_pct(m.get('return_pct'))}</td>"
-                f"<td>{_fmt_num(m.get('price'))}</td>"
+                f"<td>{_signed_value_html(_fmt_pct(m.get('return_pct')), m.get('return_pct')) if m.get('return_pct') is not None else '-'}</td>"
+                f"<td>{_signed_value_html(_fmt_num(m.get('price')), m.get('return_pct')) if m.get('price') is not None else '-'}</td>"
                 f"<td>{_fmt_eok(m.get('value_traded'))}</td>"
                 "</tr>"
             )
@@ -552,6 +569,7 @@ def _render_thema_report_html(
         ".rs-box{text-align:right;min-width:110px;}.rs-score{font-size:28px;font-weight:800;color:#0f172a;line-height:1;}.rs-rank{margin-top:6px;color:var(--muted);font-size:12px;}.rs-bar{margin-top:10px;height:8px;border-radius:999px;background:#e6edf7;overflow:hidden;}.rs-fill{height:100%;background:linear-gradient(90deg,#38bdf8,#2563eb);border-radius:999px;}"
         ".metrics{margin:14px 0 12px;}.metric{flex:1 1 160px;background:var(--panel-soft);border:1px solid var(--line);border-radius:16px;padding:12px;}.metric .k{font-size:12px;color:var(--muted);}.metric .v{margin-top:6px;font-size:18px;font-weight:700;}"
         ".signal-list{margin-top:10px;}.signal{font-size:12px;padding:6px 10px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;}"
+        ".pos{color:#d92d20;font-weight:700;}.neg{color:#0969da;font-weight:700;}.neutral{color:#667085;font-weight:600;}"
         "table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;margin-top:14px;overflow:hidden;border:1px solid var(--line);border-radius:16px;}th,td{padding:10px 10px;border-top:1px solid var(--line);text-align:right;background:#fff;}thead th{background:#f8fafc;border-top:none;color:#334155;font-weight:700;}tbody tr:nth-child(even) td{background:#fbfdff;}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left;}.leaderboard-table th,.leaderboard-table td{text-align:left;}.leaderboard-table th:nth-child(3),.leaderboard-table td:nth-child(3),.leaderboard-table th:nth-child(4),.leaderboard-table td:nth-child(4),.leaderboard-table th:nth-child(5),.leaderboard-table td:nth-child(5),.leaderboard-table th:nth-child(6),.leaderboard-table td:nth-child(6){text-align:right;}"
         "a{color:#1d4ed8;text-decoration:none;}a:hover{text-decoration:underline;}@media (max-width:720px){.wrap{padding:18px 14px 36px;}.hero{padding:22px 20px;}.card-head{flex-direction:column;}.rs-box{text-align:left;}}"
         "</style></head><body><div class=\"wrap\">"
