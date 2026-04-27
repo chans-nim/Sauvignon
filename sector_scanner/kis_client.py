@@ -63,9 +63,9 @@ def _norm_stock_quote(out0: dict[str, Any]) -> dict[str, Any]:
     u = _upper_map(out0)
     price = _pick(u, "STCK_PRPR", "PRPR", "STCK_CLPR")
     prev_close = _to_float(_pick(u, "STCK_PRDY_CLPR", "PRDY_CLPR"))
-    return_pct = _to_float(_pick(u, "PRDY_CTRT", "FLUC_RT", "CTRT"))
-    if abs(return_pct) > 0.35:
-        return_pct = return_pct / 100.0
+    # KIS PRDY_CTRT(등락률)는 퍼센트 스케일(1.5 → 1.5%)이므로 항상 소수로 환산한다.
+    # abs()>0.35 휴리스틱은 ±0.35% 미만에서 변환 누락(100배 오표시)을 유발한다.
+    return_pct = _to_float(_pick(u, "PRDY_CTRT", "FLUC_RT", "CTRT")) / 100.0
     return {
         "symbol": str(_pick(u, "MKSC_SHRN_ISCD", "ISCD") or "").strip(),
         "name": str(_pick(u, "HTS_KOR_ISNM", "PRDT_NAME") or "").strip(),
@@ -154,9 +154,7 @@ def _norm_sector_current_row(
             "PRPR",
         )
     )
-    chg_pct = _to_float(_pick(u, "BSTP_NMIX_PRDY_CTRT", "PRDY_CTRT", "FLUC_RT", "CTRT"))
-    if abs(chg_pct) > 0.35:
-        chg_pct = chg_pct / 100.0
+    chg_pct = _to_float(_pick(u, "BSTP_NMIX_PRDY_CTRT", "PRDY_CTRT", "FLUC_RT", "CTRT")) / 100.0
     hi = _pick(u, "BSTP_NMIX_HGPR", "PRDY_HGPR", "HGPR", "IDX_HGPR")
     lo = _pick(u, "BSTP_NMIX_LWPR", "PRDY_LWPR", "LWPR", "IDX_LWPR")
     return {

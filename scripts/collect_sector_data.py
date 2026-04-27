@@ -38,6 +38,15 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
 if load_dotenv is not None:
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+# KIS 업종 `relative_strength_score`(코호트 내) — `collect_thema_sector_data`와 동일 취지: 등락·상위 대표 거래대금·breadth 위주, 보조: 장중/가속/권. 합 1.0
+SECTOR_STRENGTH_W_SECTOR_RETURN = 0.28
+SECTOR_STRENGTH_W_MEMBER_AVG_RETURN = 0.24
+SECTOR_STRENGTH_W_TOP_VALUE_SUM = 0.18
+SECTOR_STRENGTH_W_MEMBER_POSITIVE = 0.12
+SECTOR_STRENGTH_W_INTRADAY = 0.08
+SECTOR_STRENGTH_W_ACCELERATION = 0.05
+SECTOR_STRENGTH_W_RANGE = 0.05
+
 
 def _sector_snapshot_map(sectors: list[Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
@@ -157,7 +166,9 @@ def _analyze_sector_overview(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
     metrics: list[dict[str, float | str | None]] = []
     for row in rows:
         snap = dict(row.get("snapshot") or {})
-        stock_stats = _stock_stats(list(row.get("major_stocks") or []))
+        stock_list = list(row.get("major_stocks") or [])
+        stock_stats = _stock_stats(stock_list)
+        top_members_value_sum = float(sum(_safe_float(m.get("value_traded"), 0.0) for m in stock_list))
         range_stats = _intraday_range_stats(snap)
         flow_support = _safe_float(snap.get("program_flow_strength"), 0.0) + _safe_float(
             snap.get("foreign_institution_flow_strength"), 0.0
@@ -175,6 +186,7 @@ def _analyze_sector_overview(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "distance_from_high_pct": range_stats["distance_from_high_pct"],
                 "member_avg_return_pct": stock_stats["member_avg_return_pct"] if stock_stats["member_avg_return_pct"] is not None else 0.0,
                 "member_positive_ratio": stock_stats["member_positive_ratio"] if stock_stats["member_positive_ratio"] is not None else 0.0,
+                "top_members_value_sum": top_members_value_sum,
                 "top_member_share": stock_stats["top_member_share"],
                 "flow_support_strength": flow_support,
                 "collected_at": collected_at,
@@ -188,27 +200,40 @@ def _analyze_sector_overview(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
         "range_position_pct",
         "member_avg_return_pct",
         "member_positive_ratio",
+        "top_members_value_sum",
     )
     pct_maps = {k: _pct_rank_map([float(m[k] or 0.0) for m in metrics]) for k in keys}
     strength_scores: list[float] = []
     for metric in metrics:
         rs = (
-            pct_maps["return_pct"].get(float(metric["return_pct"] or 0.0), 0.0) * 0.30
-            + pct_maps["intraday_trend"].get(float(metric["intraday_trend"] or 0.0), 0.0) * 0.15
-            + pct_maps["acceleration"].get(float(metric["acceleration"] or 0.0), 0.0) * 0.10
-            + pct_maps["range_position_pct"].get(float(metric["range_position_pct"] or 0.0), 0.0) * 0.10
-            + pct_maps["member_avg_return_pct"].get(float(metric["member_avg_return_pct"] or 0.0), 0.0) * 0.20
-            + pct_maps["member_positive_ratio"].get(float(metric["member_positive_ratio"] or 0.0), 0.0) * 0.15
+            pct_maps["return_pct"].get(float(metric["return_pct"] or 0.0), 0.0) * SECTOR_STRENGTH_W_SECTOR_RETURN
+            + pct_maps["member_avg_return_pct"].get(float(metric["member_avg_return_pct"] or 0.0), 0.0)
+            * SECTOR_STRENGTH_W_MEMBER_AVG_RETURN
+            + pct_maps["top_members_value_sum"].get(float(metric["top_members_value_sum"] or 0.0), 0.0)
+            * SECTOR_STRENGTH_W_TOP_VALUE_SUM
+            + pct_maps["member_positive_ratio"].get(float(metric["member_positive_ratio"] or 0.0), 0.0)
+            * SECTOR_STRENGTH_W_MEMBER_POSITIVE
+            + pct_maps["intraday_trend"].get(float(metric["intraday_trend"] or 0.0), 0.0) * SECTOR_STRENGTH_W_INTRADAY
+            + pct_maps["acceleration"].get(float(metric["acceleration"] or 0.0), 0.0) * SECTOR_STRENGTH_W_ACCELERATION
+            + pct_maps["range_position_pct"].get(float(metric["range_position_pct"] or 0.0), 0.0) * SECTOR_STRENGTH_W_RANGE
         )
         strength_scores.append(rs)
 
-    score_order = sorted(strength_scores, reverse=True)
     total = len(rows)
+    rank_order = sorted(
+        range(total),
+        key=lambda i: (
+            -strength_scores[i],
+            str(rows[i].get("sector_name", "")),
+            str(rows[i].get("sector_code", "")),
+        ),
+    )
+    rank_by_index = {orig_i: r + 1 for r, orig_i in enumerate(rank_order)}
     for idx, row in enumerate(rows):
         snap = dict(row.get("snapshot") or {})
         metric = metrics[idx]
         rs_score = round(strength_scores[idx], 1)
-        rs_rank = score_order.index(strength_scores[idx]) + 1
+        rs_rank = rank_by_index[idx]
         signal_labels: list[str] = []
         if float(metric["return_pct"] or 0.0) > 0:
             signal_labels.append("섹터 수익률 플러스")
@@ -258,6 +283,7 @@ def _analyze_sector_overview(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             else None,
             "top_member_share_pct": round(float(top_share or 0.0) * 100.0, 1) if top_share is not None else None,
             "flow_support_strength": round(float(metric["flow_support_strength"] or 0.0), 4),
+            "top_members_value_sum": round(float(metric.get("top_members_value_sum", 0.0)), 0),
             "component_percentiles": {
                 "sector_return_pct": round(pct_maps["return_pct"].get(float(metric["return_pct"] or 0.0), 0.0), 1),
                 "intraday_trend": round(pct_maps["intraday_trend"].get(float(metric["intraday_trend"] or 0.0), 0.0), 1),
@@ -268,6 +294,9 @@ def _analyze_sector_overview(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
                 ),
                 "member_positive_ratio": round(
                     pct_maps["member_positive_ratio"].get(float(metric["member_positive_ratio"] or 0.0), 0.0), 1
+                ),
+                "top_members_value_sum": round(
+                    pct_maps["top_members_value_sum"].get(float(metric["top_members_value_sum"] or 0.0), 0.0), 1
                 ),
             },
         }
@@ -356,17 +385,29 @@ def _sector_seed_rows(idx_rows: list[dict[str, Any]], sectors: list[Any]) -> lis
 
 
 def _render_sector_summary_md(rows: list[dict[str, Any]], *, top_n: int) -> str:
-    lines: list[str] = []
-    lines.append("# Sector Overview")
-    lines.append("")
-    lines.append(f"> 생성 시각: {_collection_window_text(rows)}")
-    lines.append(f"> 섹터 수: {len(rows)} / 섹터별 대표 종목 수: {top_n}")
-    lines.append("> 상대강도 기준: sector return + intraday trend + acceleration + top-stock breadth")
-    lines.append("")
-    lines.append("## Top Leaderboard")
-    lines.append("")
-    lines.append("| 순위 | 섹터 | RS | 상태 | 수집 시각 |")
-    lines.append("| --- | --- | ---: | --- | --- |")
+    lines: list[str] = [
+        "# Sector Overview",
+        "",
+        f"> 생성 시각: {_collection_window_text(rows)}",
+        f"> 섹터 수: {len(rows)} / 섹터별 대표 종목 수: {top_n}",
+        "> `collect_thema_sector_data`와 **동일 취지**: **업종 등락**·**상위 대표 거래대금 합**·**상위 평균·breadth**를 우선(주도/실시간), 장중/가속/권은 보조.",
+        f"> RS 가중(합1): {int(SECTOR_STRENGTH_W_SECTOR_RETURN*100)}/{int(SECTOR_STRENGTH_W_MEMBER_AVG_RETURN*100)}/"
+        f"{int(SECTOR_STRENGTH_W_TOP_VALUE_SUM*100)}/{int(SECTOR_STRENGTH_W_MEMBER_POSITIVE*100)}/"
+        f"{int(SECTOR_STRENGTH_W_INTRADAY*100)}/{int(SECTOR_STRENGTH_W_ACCELERATION*100)}/{int(SECTOR_STRENGTH_W_RANGE*100)}"
+        f" = 섹터등락/대표평균/대표대금합/상승비중/장중/가속/권",
+        "",
+        "<details open>",
+        "<summary>Top Leaderboard</summary>",
+        "",
+        "## Top Leaderboard",
+        "",
+        (
+            f"> **주도/코호트:** 수집된 업종끼리 RS 상대 비교. (thema와 동일하게) **등락·대표 거래대금** 비중이 큼."
+        ),
+        "",
+        f"| 순위 | 섹터 | RS | Top{top_n} 평균 | 상태 | 수집 시각 |",
+        "| --- | --- | ---: | ---: | --- | --- |",
+    ]
     for idx, row in enumerate(rows[:10], start=1):
         analysis = dict(row.get("analysis") or {})
         code = str(row.get("sector_code", "")).strip()
@@ -375,17 +416,23 @@ def _render_sector_summary_md(rows: list[dict[str, Any]], *, top_n: int) -> str:
         display = f"{name} `{code}`"
         if api_code and api_code != code:
             display = f"{name} `{code}->{api_code}`"
+        tpn = (
+            _fmt_pct(_safe_float(analysis.get("member_avg_return_pct"), 0.0) / 100.0)
+            if analysis.get("member_avg_return_pct") is not None
+            else "-"
+        )
         lines.append(
-            f"| {idx} | {display} | {analysis.get('relative_strength_score', '-')} | "
+            f"| {idx} | {display} | {analysis.get('relative_strength_score', '-')} | {tpn} | "
             f"{analysis.get('leader_status', '-')} | {_fmt_ts(analysis.get('collected_at'))} |"
         )
-    lines.append("")
+    lines.extend(["", "</details>", "", "<details open>", "<summary>업종 상세 (섹터 카드)</summary>", ""])
     for row in rows:
         code = str(row.get("sector_code", "")).strip()
         name = str(row.get("sector_name", "")).strip() or code
         members = row.get("major_stocks") or []
         snap = row.get("snapshot") or {}
         analysis = dict(row.get("analysis") or {})
+        cp = dict(analysis.get("component_percentiles") or {})
         ret = snap.get("return_pct")
         trend = snap.get("intraday_trend")
         accel = snap.get("acceleration")
@@ -414,6 +461,10 @@ def _render_sector_summary_md(rows: list[dict[str, Any]], *, top_n: int) -> str:
             f"상승 비중 `{_fmt_pct(_safe_float(analysis.get('member_positive_ratio'), 0.0) / 100.0) if analysis.get('member_positive_ratio') is not None else '-'}`"
         )
         lines.append(
+            f"- **대표 거래대금 합(원)**: `{_fmt_num(analysis.get('top_members_value_sum'))}` / "
+            f"코호트 백분위 `{cp.get('top_members_value_sum', '-')}`"
+        )
+        lines.append(
             f"- 거래대금 쏠림: 상위 1종목 비중 `{_fmt_pct(_safe_float(analysis.get('top_member_share_pct'), 0.0) / 100.0) if analysis.get('top_member_share_pct') is not None else '-'}` / "
             f"수급 보강 `{_fmt_num(analysis.get('flow_support_strength'))}` / "
             f"신호 개수 `{analysis.get('leader_signal_count', 0)}`"
@@ -438,6 +489,7 @@ def _render_sector_summary_md(rows: list[dict[str, Any]], *, top_n: int) -> str:
                 f"{_fmt_eok(vt)} | {rk if rk not in (None, '') else '-'} |"
             )
         lines.append("")
+    lines.append("</details>")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -506,6 +558,27 @@ def _stock_price(member: dict[str, Any]) -> float | None:
 
 def _escape_html(value: Any) -> str:
     return html.escape(str(value))
+
+
+def _sign_class(value: Any) -> str:
+    v = _safe_float(value, 0.0)
+    if v > 0:
+        return "pos"
+    if v < 0:
+        return "neg"
+    return "neutral"
+
+
+def _signed_value_html(text: str, sign_value: Any) -> str:
+    return f'<span class="{_sign_class(sign_value)}">{_escape_html(text)}</span>'
+
+
+def _leader_cls(status: str) -> str:
+    if status == "주도":
+        return "leader-yes"
+    if status == "관심":
+        return "leader-watch"
+    return "leader-flat"
 
 
 def _naver_finance_stock_url(symbol: str) -> str:
@@ -641,53 +714,54 @@ def _render_sector_report_html(rows: list[dict[str, Any]], *, top_n: int) -> str
     parts.append("<head>")
     parts.append("<meta charset=\"utf-8\">")
     parts.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+    wtag = (
+        f"{int(SECTOR_STRENGTH_W_SECTOR_RETURN * 100)}/"
+        f"{int(SECTOR_STRENGTH_W_MEMBER_AVG_RETURN * 100)}/"
+        f"{int(SECTOR_STRENGTH_W_TOP_VALUE_SUM * 100)}/"
+        f"{int(SECTOR_STRENGTH_W_MEMBER_POSITIVE * 100)}/"
+        f"{int(SECTOR_STRENGTH_W_INTRADAY * 100)}/"
+        f"{int(SECTOR_STRENGTH_W_ACCELERATION * 100)}/"
+        f"{int(SECTOR_STRENGTH_W_RANGE * 100)}"
+    )
     parts.append("<title>Sector Overview</title>")
     parts.append(
         "<style>"
-        ":root{--bg:#0b1020;--panel:#ffffff;--panel-soft:#f4f7fb;--text:#111827;--muted:#667085;--line:#e5e7eb;"
-        "--up:#0f9f6e;--down:#d92d20;--flat:#667085;--leader:#0ea5e9;--watch:#f59e0b;}"
+        ":root{--bg:#0b1020;--panel:#ffffff;--panel-soft:#f4f7fb;--text:#111827;--muted:#667085;--line:#e5e7eb;}"
         "body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:linear-gradient(180deg,#0b1020 0,#10182d 280px,#eef3f8 280px,#eef3f8 100%);color:var(--text);}"
-        ".wrap{max-width:1440px;margin:0 auto;padding:28px 24px 48px;}"
-        ".hero{background:linear-gradient(135deg,#0f172a,#1d4ed8 60%,#0ea5e9);color:#fff;border-radius:24px;padding:28px 32px;box-shadow:0 20px 40px rgba(15,23,42,.22);}"
-        ".hero h1{margin:0 0 10px;font-size:32px;}.hero p{margin:0;color:rgba(255,255,255,.86);font-size:14px;}"
-        ".hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px;}"
-        ".hero-stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:14px 16px;backdrop-filter:blur(4px);}"
+        ".wrap{max-width:1480px;margin:0 auto;padding:28px 24px 48px;}.hero{background:linear-gradient(135deg,#0f172a,#1d4ed8 60%,#0ea5e9);color:#fff;border-radius:24px;padding:28px 32px;box-shadow:0 20px 40px rgba(15,23,42,.22);}"
+        ".hero h1{margin:0 0 10px;font-size:32px;}.hero p{margin:0;color:rgba(255,255,255,.86);font-size:14px;line-height:1.6;}"
+        ".hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px;}.hero-stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:14px 16px;}"
         ".hero-stat .label{font-size:12px;color:rgba(255,255,255,.75);}.hero-stat .value{margin-top:6px;font-size:20px;font-weight:700;}"
-        ".section{margin-top:24px;}.section-title{margin:0 0 12px;font-size:18px;color:#0f172a;}"
-        ".leaderboard,.card{background:var(--panel);border:1px solid rgba(15,23,42,.06);border-radius:22px;box-shadow:0 14px 34px rgba(15,23,42,.08);}"
-        ".leaderboard{padding:18px 20px;}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;}"
-        ".card{padding:18px;position:relative;overflow:hidden;}"
-        ".card::before{content:'';position:absolute;inset:0 auto auto 0;width:100%;height:4px;background:linear-gradient(90deg,#38bdf8,#2563eb);opacity:.9;}"
-        ".card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px;}"
-        ".card h2{margin:0;font-size:22px;}.sub{margin-top:4px;color:var(--muted);font-size:12px;}"
-        ".meta,.metrics,.signal-list{display:flex;flex-wrap:wrap;gap:8px;}"
-        ".pill{font-size:12px;padding:6px 10px;border-radius:999px;background:#f3f6fb;border:1px solid #dbe3ef;color:#334155;}"
+        ".section-title{margin:0;color:#0f172a;font-size:18px;font-weight:700;cursor:pointer;list-style:none;padding:16px 18px;background:#fff;border:1px solid rgba(15,23,42,.06);border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.06);}"
+        ".section-title::-webkit-details-marker,.card-summary::-webkit-details-marker{display:none;}.fold[open]>.section-title{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0;}"
+        ".leaderboard,.card{background:var(--panel);border:1px solid rgba(15,23,42,.06);border-radius:22px;box-shadow:0 14px 34px rgba(15,23,42,.08);}.leaderboard{padding:18px 20px;border-top-left-radius:0;border-top-right-radius:0;}"
+        ".lb-footnote{margin:10px 0 0;padding:0 4px;font-size:12px;color:var(--muted);line-height:1.45;}"
+        ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;margin-top:14px;}.card{position:relative;overflow:hidden;}"
+        ".card::before{content:'';position:absolute;inset:0 auto auto 0;width:100%;height:4px;background:linear-gradient(90deg,#38bdf8,#2563eb);}"
+        ".card-head,.card-summary{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}.card-summary{padding:18px;cursor:pointer;list-style:none;}.card-body{padding:0 18px 18px;}.card h2{margin:0;font-size:22px;}.sub{margin-top:4px;color:var(--muted);font-size:12px;}"
+        ".meta,.metrics,.signal-list{display:flex;flex-wrap:wrap;gap:8px;}.pill{font-size:12px;padding:6px 10px;border-radius:999px;background:#f3f6fb;border:1px solid #dbe3ef;color:#334155;}"
         ".leader-yes{background:#dcfce7;border-color:#86efac;color:#166534;}.leader-watch{background:#fef3c7;border-color:#fcd34d;color:#92400e;}.leader-flat{background:#eef2f7;border-color:#d0d7e2;color:#475467;}"
-        ".rs-box{text-align:right;min-width:110px;}.rs-score{font-size:28px;font-weight:800;color:#0f172a;line-height:1;}.rs-rank{margin-top:6px;color:var(--muted);font-size:12px;}"
-        ".rs-bar{margin-top:10px;height:8px;border-radius:999px;background:#e6edf7;overflow:hidden;}.rs-fill{height:100%;background:linear-gradient(90deg,#38bdf8,#2563eb);border-radius:999px;}"
-        ".metrics{margin:14px 0 12px;}.metric{flex:1 1 160px;background:var(--panel-soft);border:1px solid var(--line);border-radius:16px;padding:12px;}"
-        ".metric .k{font-size:12px;color:var(--muted);}.metric .v{margin-top:6px;font-size:18px;font-weight:700;}"
+        ".rs-box{text-align:right;min-width:110px;}.rs-score{font-size:28px;font-weight:800;color:#0f172a;line-height:1;}.rs-rank{margin-top:6px;color:var(--muted);font-size:12px;}.rs-bar{margin-top:10px;height:8px;border-radius:999px;background:#e6edf7;overflow:hidden;}.rs-fill{height:100%;background:linear-gradient(90deg,#38bdf8,#2563eb);border-radius:999px;}"
+        ".eval-scope{margin:0 0 10px;padding:10px 12px;border-radius:12px;background:#f0f6ff;border:1px solid #bfdbfe;font-size:12px;color:#1e3a5f;line-height:1.45;}"
+        ".metrics{margin:14px 0 12px;}.metric{flex:1 1 160px;background:var(--panel-soft);border:1px solid var(--line);border-radius:16px;padding:12px;}.metric .k{font-size:12px;color:var(--muted);}.metric .v{margin-top:6px;font-size:18px;font-weight:700;}"
         ".signal-list{margin-top:10px;}.signal{font-size:12px;padding:6px 10px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;}"
+        ".pos{color:#d92d20;font-weight:700;}.neg{color:#0969da;font-weight:700;}.neutral{color:#667085;font-weight:600;}"
         "table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;margin-top:14px;overflow:hidden;border:1px solid var(--line);border-radius:16px;}"
-        "th,td{padding:10px 10px;border-top:1px solid var(--line);text-align:right;background:#fff;}"
-        "thead th{background:#f8fafc;border-top:none;color:#334155;font-weight:700;}"
-        "tbody tr:nth-child(even) td{background:#fbfdff;}"
-        "th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left;}"
-        ".up{color:var(--up);font-weight:700;}.down{color:var(--down);font-weight:700;}.flat{color:var(--flat);}"
-        ".muted{color:var(--muted);font-size:13px;}.leaderboard-table th,.leaderboard-table td{text-align:left;}"
-        ".leaderboard-table th:nth-child(3),.leaderboard-table td:nth-child(3),.leaderboard-table th:nth-child(4),.leaderboard-table td:nth-child(4){text-align:right;}"
+        "th,td{padding:10px 10px;border-top:1px solid var(--line);text-align:right;background:#fff;}thead th{background:#f8fafc;border-top:none;color:#334155;font-weight:700;}tbody tr:nth-child(even) td{background:#fbfdff;}"
+        "th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left;}.leaderboard-table th,.leaderboard-table td{text-align:left;}"
+        ".leaderboard-table th:nth-child(3),.leaderboard-table td:nth-child(3),.leaderboard-table th:nth-child(4),.leaderboard-table td:nth-child(4),.leaderboard-table th:nth-child(5),.leaderboard-table td:nth-child(5),.leaderboard-table th:nth-child(6),.leaderboard-table td:nth-child(6){text-align:right;}"
+        "a{color:#1d4ed8;text-decoration:none;}a:hover{text-decoration:underline;}.muted{color:var(--muted);font-size:13px;}"
         "@media (max-width:720px){.wrap{padding:18px 14px 36px;}.hero{padding:22px 20px;}.card-head{flex-direction:column;}.rs-box{text-align:left;}}"
         "</style>"
     )
-    parts.append("</head><body>")
-    parts.append("<div class=\"wrap\">")
+    parts.append("</head><body><div class=\"wrap\">")
     parts.append("<section class=\"hero\">")
     parts.append("<h1>Sector Overview</h1>")
     parts.append(
-        "<p>"
-        f"수집 시각: {_escape_html(_collection_window_text(rows))} / "
-        "상대강도 기준: sector return + intraday trend + acceleration + top-stock breadth"
-        "</p>"
+        "<p>수집 시각: "
+        + _escape_html(_collection_window_text(rows))
+        + " · thema와 동일 취지: <strong>등락·상위 대표 거래대금</strong> 우선 · "
+        f"RS 가중 {wtag} = 섹터등락/대표평균/대표대금합/상승비중/장중/가속/권</p>"
     )
     leader_count = sum(1 for row in rows if dict(row.get("analysis") or {}).get("leader_status") == "주도")
     watch_count = sum(1 for row in rows if dict(row.get("analysis") or {}).get("leader_status") == "관심")
@@ -695,127 +769,152 @@ def _render_sector_report_html(rows: list[dict[str, Any]], *, top_n: int) -> str
     parts.append(f"<div class=\"hero-stat\"><div class=\"label\">섹터 수</div><div class=\"value\">{len(rows)}</div></div>")
     parts.append(f"<div class=\"hero-stat\"><div class=\"label\">주도 섹터</div><div class=\"value\">{leader_count}</div></div>")
     parts.append(f"<div class=\"hero-stat\"><div class=\"label\">관심 섹터</div><div class=\"value\">{watch_count}</div></div>")
-    parts.append(f"<div class=\"hero-stat\"><div class=\"label\">대표 종목 수</div><div class=\"value\">{top_n}</div></div>")
-    parts.append("</div>")
-    parts.append("</section>")
-    parts.append("<section class=\"section\">")
-    parts.append("<h2 class=\"section-title\">Top Leaderboard</h2>")
-    parts.append("<div class=\"leaderboard\">")
-    parts.append("<table class=\"leaderboard-table\"><thead><tr><th>순위</th><th>섹터</th><th>RS</th><th>상태</th><th>수집 시각</th></tr></thead><tbody>")
+    parts.append(f"<div class=\"hero-stat\"><div class=\"label\">대표 종목</div><div class=\"value\">{top_n}</div></div>")
+    parts.append("</div></section>")
+    parts.append(
+        "<details class=\"section fold\" open><summary class=\"section-title\">Top Leaderboard</summary><div class=\"leaderboard\">"
+    )
+    parts.append(
+        "<table class=\"leaderboard-table\"><thead><tr>"
+        f"<th>순위</th><th>섹터</th><th>RS</th><th>Top{top_n} 평균</th><th>상태</th><th>수집 시각</th>"
+        "</tr></thead><tbody>"
+    )
     for idx, row in enumerate(rows[:10], start=1):
         analysis = dict(row.get("analysis") or {})
         code = str(row.get("sector_code", "")).strip()
         api_code = str(row.get("api_sector_code", "")).strip()
         name = str(row.get("sector_name", "")).strip() or code
         display = f"{_escape_html(name)} <span class=\"muted\">{_escape_html(code if not api_code or api_code == code else f'{code}->{api_code}')}</span>"
+        mavg = analysis.get("member_avg_return_pct")
+        if mavg is not None:
+            tpn_html = _signed_value_html(
+                _fmt_pct(_safe_float(mavg, 0.0) / 100.0),
+                _safe_float(mavg, 0.0) / 100.0,
+            )
+        else:
+            tpn_html = "-"
         parts.append(
             "<tr>"
-            f"<td>{idx}</td>"
-            f"<td>{display}</td>"
-            f"<td>{analysis.get('relative_strength_score', '-')}</td>"
-            f"<td>{_escape_html(analysis.get('leader_status', '-'))}</td>"
-            f"<td>{_escape_html(_fmt_ts(analysis.get('collected_at')))}</td>"
-            "</tr>"
+            f"<td>{idx}</td><td>{display}</td><td>{analysis.get('relative_strength_score', '-')}</td><td>{tpn_html}</td>"
+            f"<td>{_escape_html(str(analysis.get('leader_status', '-')))}</td>"
+            f"<td>{_escape_html(_fmt_ts(analysis.get('collected_at')))}</td></tr>"
         )
     parts.append("</tbody></table>")
-    parts.append("</div>")
-    parts.append("</section>")
-    parts.append("<section class=\"section\">")
-    parts.append("<h2 class=\"section-title\">Sector Cards</h2>")
-    parts.append("<div class=\"grid\">")
-    for row in rows:
+    parts.append(
+        "<p class=\"lb-footnote\">코호트 내 RS. "
+        "등락·상위 대표 거래대금 합(대표 종목)에 가장 큰 가중(thema와 정합).</p></div></details>"
+    )
+    parts.append(
+        f"<details class=\"section fold\" open><summary class=\"section-title\">Sector cards ({len(rows)})</summary><div class=\"grid\">"
+    )
+    for cidx, row in enumerate(rows):
         code = str(row.get("sector_code", "")).strip()
         api_code = str(row.get("api_sector_code", "")).strip()
         name = str(row.get("sector_name", "")).strip() or code
         market = str(row.get("market_label", "")).strip() or _market_label_for_code(code)
         snap = dict(row.get("snapshot") or {})
         analysis = dict(row.get("analysis") or {})
+        cp = dict(analysis.get("component_percentiles") or {})
         members = list(row.get("major_stocks") or [])
-        leader_cls = "leader-flat"
-        if analysis.get("leader_status") == "주도":
-            leader_cls = "leader-yes"
-        elif analysis.get("leader_status") == "관심":
-            leader_cls = "leader-watch"
-        parts.append("<section class=\"card\">")
-        parts.append("<div class=\"card-head\">")
+        leader_cls = _leader_cls(str(analysis.get("leader_status", "-")))
+        rs_value = float(_safe_float(analysis.get("relative_strength_score"), 0.0))
+        tvs = float(analysis.get("top_members_value_sum") or 0.0)
+        oattr = " open" if cidx == 0 else ""
+        parts.append(f"<details class=\"card\"{oattr}>")
+        parts.append("<summary class=\"card-head card-summary\">")
         parts.append("<div>")
         parts.append(f"<h2>{_escape_html(name)}</h2>")
-        parts.append(
-            f"<div class=\"sub\">{_escape_html(market)} / "
-            f"sector_code={_escape_html(code)} / api_code={_escape_html(api_code or '-')} / "
-            f"수집={_escape_html(_fmt_ts(analysis.get('collected_at') or snap.get('as_of')))}</div>"
-        )
+        sub = f"{_escape_html(market)} · {_escape_html(code)}"
+        if api_code and api_code != code:
+            sub += f" → {_escape_html(api_code)}"
+        sub += f" · 수집 {_escape_html(_fmt_ts(analysis.get('collected_at') or snap.get('as_of')))}"
+        parts.append(f"<div class=\"sub\">{sub}</div>")
         parts.append("<div class=\"meta\">")
-        parts.append(f"<span class=\"pill {leader_cls}\">{_escape_html(analysis.get('leader_status', '-'))}</span>")
-        parts.append(f"<span class=\"pill\">signals {analysis.get('leader_signal_count', 0)}</span>")
-        parts.append(f"<span class=\"pill\">current_index {_escape_html(_fmt_num(snap.get('current_index')))}</span>")
-        parts.append(f"<span class=\"pill\">고가 {_escape_html(_fmt_num(snap.get('high_index')))}</span>")
-        parts.append(f"<span class=\"pill\">저가 {_escape_html(_fmt_num(snap.get('low_index')))}</span>")
-        parts.append("</div>")
-        parts.append("</div>")
-        rs_value = float(_safe_float(analysis.get("relative_strength_score"), 0.0))
+        parts.append(f"<span class=\"pill {leader_cls}\">{_escape_html(str(analysis.get('leader_status', '-')))}</span>")
+        parts.append(
+            f"<span class=\"pill\">signals { analysis.get('leader_signal_count', 0)}</span>"
+        )
+        parts.append(
+            f"<span class=\"pill\">지수 {_escape_html( _fmt_num(snap.get('current_index')) )} · "
+            f"H {_escape_html( _fmt_num(snap.get('high_index')) )} / L {_escape_html( _fmt_num(snap.get('low_index')) )}</span>"
+        )
+        parts.append("</div></div>")
         parts.append("<div class=\"rs-box\">")
         parts.append(f"<div class=\"rs-score\">{rs_value:.1f}</div>")
         parts.append(
-            f"<div class=\"rs-rank\">RS Rank #{analysis.get('relative_strength_rank', '-')} / "
-            f"{analysis.get('relative_strength_total', '-')}</div>"
+            f'<div class="rs-rank">RS #{ analysis.get("relative_strength_rank", "-")} / '
+            f'{ analysis.get("relative_strength_total", "-")}</div>'
         )
-        parts.append(f"<div class=\"rs-bar\"><div class=\"rs-fill\" style=\"width:{max(0.0, min(100.0, rs_value)):.1f}%\"></div></div>")
-        parts.append("</div>")
-        parts.append("</div>")
+        parts.append(
+            f'<div class="rs-bar"><div class="rs-fill" style="width:{max(0.0, min(100.0, rs_value)):.1f}%"></div></div></div></summary>'
+        )
+        parts.append("<div class=\"card-body\">")
+        val_note = f"대표 거래대금 합(원) {_fmt_num(tvs)}" if tvs else "대표 거래대금 합 없음"
+        parts.append(
+            f'<p class="eval-scope">섹터 RS는 <strong>이번에 수집된 업종 집단</strong>에서만 상대 비교. '
+            f"{_escape_html(val_note)} · 코호트 백분위 { _escape_html( str( cp.get('top_members_value_sum', '-') ) ) }.</p>"
+        )
         parts.append("<div class=\"metrics\">")
-        metric_pairs = [
-            ("등락률", _fmt_pct(snap.get("return_pct"))),
-            ("장중 추세", _fmt_pct(snap.get("intraday_trend"))),
-            ("가속도", _fmt_pct(snap.get("acceleration"))),
+        mrows: list[tuple[str, str, Any | None]] = [
+            ("섹터 등락", _fmt_pct(snap.get("return_pct")), snap.get("return_pct")),
+            ("장중 추세", _fmt_pct(snap.get("intraday_trend")), snap.get("intraday_trend")),
+            ("가속도", _fmt_pct(snap.get("acceleration")), snap.get("acceleration")),
             (
                 "상위 종목 평균",
                 _fmt_pct(_safe_float(analysis.get("member_avg_return_pct"), 0.0) / 100.0)
                 if analysis.get("member_avg_return_pct") is not None
                 else "-",
+                analysis.get("member_avg_return_pct"),
             ),
             (
                 "상승 비중",
                 _fmt_pct(_safe_float(analysis.get("member_positive_ratio"), 0.0) / 100.0)
                 if analysis.get("member_positive_ratio") is not None
                 else "-",
+                None,
             ),
+            ("대표 대금 합(억)", _fmt_eok(tvs) if tvs else "-", tvs if tvs else None),
+            ("대표대금 백분위(코호트)", str(cp.get("top_members_value_sum", "-")), None),
             (
-                "고가권 위치",
+                "고가권",
                 _fmt_pct(_safe_float(analysis.get("range_position_pct"), 0.0) / 100.0)
                 if analysis.get("range_position_pct") is not None
                 else "-",
+                None,
             ),
             (
                 "고가 이격",
                 _fmt_pct(_safe_float(analysis.get("distance_from_high_pct"), 0.0) / 100.0)
                 if analysis.get("distance_from_high_pct") is not None
                 else "-",
+                None,
             ),
             (
-                "상위1 비중",
+                "상위1 쏠림",
                 _fmt_pct(_safe_float(analysis.get("top_member_share_pct"), 0.0) / 100.0)
                 if analysis.get("top_member_share_pct") is not None
                 else "-",
+                None,
             ),
         ]
-        for label, value in metric_pairs:
+        for label, vstr, sig in mrows:
+            vhtml = _signed_value_html(vstr, sig) if sig is not None and vstr != "-" else _escape_html(vstr)
             parts.append(
-                f"<div class=\"metric\"><div class=\"k\">{_escape_html(label)}</div><div class=\"v\">{_escape_html(value)}</div></div>"
+                f'<div class="metric"><div class="k">{_escape_html(label)}</div><div class="v">{vhtml}</div></div>'
             )
         parts.append("</div>")
-        signals = list(analysis.get("leader_signals") or [])
-        if signals:
+        sigs = list(analysis.get("leader_signals") or [])
+        if sigs:
             parts.append("<div class=\"signal-list\">")
-            for signal in signals:
-                parts.append(f"<span class=\"signal\">{_escape_html(signal)}</span>")
+            for s in sigs:
+                parts.append(f'<span class="signal">{_escape_html(s)}</span>')
             parts.append("</div>")
         if not members:
-            parts.append("<p class=\"muted\">주요 종목 없음</p>")
-            parts.append("</section>")
+            parts.append("<p class=\"muted\">주요 종목 없음</p></div></details>")
             continue
-        parts.append("<table>")
-        parts.append("<thead><tr><th>종목</th><th>코드</th><th>등락률</th><th>현재가</th><th>거래대금(억)</th><th>거래량</th><th>순위</th></tr></thead><tbody>")
+        parts.append(
+            "<table><thead><tr><th>종목</th><th>코드</th><th>등락률</th><th>현재가</th><th>거래대금(억)</th><th>거래량</th><th>순위</th></tr></thead><tbody>"
+        )
         for m in members:
             sym = str(m.get("symbol", "")).strip()
             nm = str(m.get("name", "")).strip() or sym
@@ -824,26 +923,25 @@ def _render_sector_report_html(rows: list[dict[str, Any]], *, top_n: int) -> str
             vt = m.get("value_traded")
             vol = m.get("volume")
             rk = m.get("rank")
-            cls = "flat"
-            if ret is not None:
-                if ret > 0:
-                    cls = "up"
-                elif ret < 0:
-                    cls = "down"
+            ret_s = _fmt_pct(ret)
+            ret_html = _signed_value_html(ret_s, ret) if ret is not None else _escape_html(ret_s)
+            px_html = (
+                _signed_value_html(_fmt_num(px), ret)
+                if (px is not None and ret is not None)
+                else _escape_html(_fmt_num(px))
+            )
             parts.append(
                 "<tr>"
-                f"<td><a href=\"{_escape_html(_naver_finance_stock_url(sym))}\" target=\"_blank\" rel=\"noopener noreferrer\">{_escape_html(nm)}</a></td>"
-                f"<td><a href=\"{_escape_html(_naver_finance_stock_url(sym))}\" target=\"_blank\" rel=\"noopener noreferrer\">{_escape_html(sym)}</a></td>"
-                f"<td class=\"{cls}\">{_fmt_pct(ret)}</td>"
-                f"<td>{_fmt_num(px)}</td>"
-                f"<td>{_fmt_eok(vt)}</td>"
-                f"<td>{_fmt_num(vol)}</td>"
-                f"<td>{_escape_html(rk if rk not in (None, '') else '-')}</td>"
+                f'<td><a href="{_escape_html(_naver_finance_stock_url(sym))}" target="_blank" rel="noopener noreferrer">{_escape_html(nm)}</a></td>'
+                f'<td><a href="{_escape_html(_naver_finance_stock_url(sym))}" target="_blank" rel="noopener noreferrer">{_escape_html(sym)}</a></td>'
+                f"<td>{ret_html}</td><td>{px_html}</td>"
+                f'<td>{_escape_html( _fmt_eok(vt) )}</td>'
+                f'<td>{_escape_html( _fmt_num(vol) )}</td>'
+                f'<td>{_escape_html( rk if rk not in (None, "") else "-" )}</td>'
                 "</tr>"
             )
-        parts.append("</tbody></table>")
-        parts.append("</section>")
-    parts.append("</div></section></div></body></html>")
+        parts.append("</tbody></table></div></details>")
+    parts.append("</div></details></div></body></html>")
     return "".join(parts)
 
 
