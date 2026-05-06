@@ -8,9 +8,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.collect_thema_sector_data import (
+    _all_unique_stock_symbols_from_groups,
     _build_group_blueprints,
     _build_rows,
+    classify_theme_quality,
+    calculate_breadth_score,
+    calculate_persistence_score,
     _score_group_members,
+    _select_quote_symbols,
     _render_thema_report_html,
     _resolve_classification_json,
 )
@@ -58,8 +63,33 @@ def test_build_thema_rows_and_render_html() -> None:
     assert len(major_blueprints) == 1
     assert len(middle_blueprints) == 2
 
-    major_rows = _build_rows(major_blueprints, quotes, live_signal_map, top_n=3)
-    middle_rows = _build_rows(middle_blueprints, quotes, live_signal_map, top_n=3)
+    investor_map = {
+        "005930": {"foreign_net_tr_pbmn": 500_000_000_000, "institution_net_tr_pbmn": -120_000_000_000},
+        "000660": {"foreign_net_tr_pbmn": 50_000_000_000, "institution_net_tr_pbmn": 30_000_000_000},
+        "042700": {"foreign_net_tr_pbmn": -10_000_000_000, "institution_net_tr_pbmn": 5_000_000_000},
+    }
+    program_map = {
+        "005930": {"program_net_tr_pbmn": 30_000_000_000},
+        "000660": {"program_net_tr_pbmn": 10_000_000_000},
+        "042700": {"program_net_tr_pbmn": 0},
+    }
+
+    major_rows = _build_rows(
+        major_blueprints,
+        quotes,
+        live_signal_map,
+        top_n=3,
+        investor_by_symbol=investor_map,
+        program_by_symbol=program_map,
+    )
+    middle_rows = _build_rows(
+        middle_blueprints,
+        quotes,
+        live_signal_map,
+        top_n=3,
+        investor_by_symbol=investor_map,
+        program_by_symbol=program_map,
+    )
     memory_row = next(row for row in middle_rows if row["display_path"] == "반도체 > 메모리")
 
     assert major_rows[0]["display_name"] == "반도체"
@@ -90,7 +120,14 @@ def test_build_thema_rows_and_render_html() -> None:
     )
     assert "Thema Major/Middle Sector Overview" in html
     assert 'href="https://finance.naver.com/item/main.naver?code=005930"' in html
+    assert "외국인 순매수(억)" in html
+    assert "프로그램 순매수(억)" in html
+    assert "+5,000.0" in html
     assert "대분류 Leaderboard" in html
+    assert "ThemeScoreV2" in html
+    assert "지속성" in html
+    assert "확산도" in html
+    assert "테마 품질" in html
     assert "Top3 평균" in html
     assert "<details" in html
     assert 'class="pos"' in html
@@ -113,6 +150,82 @@ def test_resolve_classification_json_returns_existing_file(tmp_path) -> None:
     p = tmp_path / "any.json"
     p.write_text("{}", encoding="utf-8")
     assert _resolve_classification_json(p) == p
+
+
+def test_all_unique_stock_symbols_from_groups() -> None:
+    data = {
+        "major_categories": [
+            {
+                "majorCategory": "M",
+                "subCategories": [
+                    {
+                        "middleCategory": "A",
+                        "stocks": [
+                            {"stockCode": "1", "stockName": "a", "marketCap": 1},
+                            {"stockCode": "2", "stockName": "b", "marketCap": 2},
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+    major_b, middle_b = _build_group_blueprints(data)
+    syms = _all_unique_stock_symbols_from_groups(major_b + middle_b)
+    assert syms == ["000001", "000002"]
+
+
+def test_select_quote_symbols_top_by_group_vs_all() -> None:
+    """기본 보강 대상은 그룹당 프로브 RS 상위 top_n 합집합; all 은 전 구성주(+라이브 키)."""
+    data = {
+        "major_categories": [
+            {
+                "majorCategory": "M",
+                "subCategories": [
+                    {
+                        "middleCategory": "A",
+                        "stocks": [
+                            {"stockCode": "111110", "stockName": "a1", "marketCap": 100},
+                            {"stockCode": "222220", "stockName": "a2", "marketCap": 100},
+                        ],
+                    },
+                    {
+                        "middleCategory": "B",
+                        "stocks": [
+                            {"stockCode": "333330", "stockName": "b1", "marketCap": 100},
+                            {"stockCode": "444440", "stockName": "b2", "marketCap": 100},
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+    major_b, middle_b = _build_group_blueprints(data)
+    groups = major_b + middle_b
+    live = {
+        "111110": {"live_signal_score": 1.0, "source_scores": {"return": 10.0}, "source_count": 1},
+        "222220": {"live_signal_score": 50.0, "source_scores": {"return": 90.0}, "source_count": 1},
+        "333330": {"live_signal_score": 30.0, "source_scores": {"return": 50.0}, "source_count": 1},
+        "444440": {"live_signal_score": 40.0, "source_scores": {"return": 60.0}, "source_count": 1},
+    }
+    top_syms = _select_quote_symbols(
+        groups,
+        live,
+        top_n=1,
+        enrichment_mode="top_by_group",
+        investor_by_symbol={},
+        program_by_symbol={},
+    )
+    all_syms = _select_quote_symbols(
+        groups,
+        live,
+        top_n=1,
+        enrichment_mode="all",
+        investor_by_symbol={},
+        program_by_symbol={},
+    )
+    assert set(all_syms) == {"111110", "222220", "333330", "444440"}
+    assert set(top_syms) <= set(all_syms)
+    assert len(top_syms) == 2
 
 
 def test_middle_group_top_n_is_rs_sorted_slice() -> None:
@@ -153,3 +266,41 @@ def test_middle_group_top_n_is_rs_sorted_slice() -> None:
     assert rows[0]["analysis"]["top_stocks_shown"] == 2
     assert rows[0]["analysis"]["top_stocks_peer_total"] == 4
     assert [m["symbol"] for m in rows[0]["major_stocks"]] == ["222220", "444440"]
+
+
+def test_classify_theme_quality_matrix() -> None:
+    assert classify_theme_quality(None, 10.0) == "데이터부족"
+    assert classify_theme_quality(80.0, None) == "데이터부족"
+    assert classify_theme_quality(70.0, 70.0) == "주도테마"
+    assert classify_theme_quality(70.0, 49.9) == "대장주 편중"
+    assert classify_theme_quality(49.9, 70.0) == "단기 순환매"
+    assert classify_theme_quality(50.0, 50.0) == "관심테마"
+    assert classify_theme_quality(30.0, 30.0) == "약세/제외"
+
+
+def test_calculate_persistence_score_data_shortage() -> None:
+    cur = {
+        "date": "2026-05-06",
+        "group_type": "major",
+        "major_category": "A",
+        "middle_category": None,
+        "theme_rs": 60.0,
+        "theme_rank": 1,
+        "total_value_traded": 100.0,
+    }
+    out = calculate_persistence_score(cur, history_rows=[], group_key=("A", None))
+    assert out["persistence_score"] is None
+    assert out["rank_top3_days_5d"] == 0
+
+
+def test_calculate_breadth_score_basic() -> None:
+    out = calculate_breadth_score(
+        member_count=100,
+        rs60_ratio=0.30,
+        rs70_ratio=0.10,
+        up_ratio=0.70,
+        market_up_ratio=0.50,
+        value_expansion_ratio=0.25,
+    )
+    assert out["breadth_score"] is not None
+    assert out["relative_up_ratio"] == 0.2

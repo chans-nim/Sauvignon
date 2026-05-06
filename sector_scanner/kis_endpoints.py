@@ -43,3 +43,7 @@ TR_TIME_ITEMCHART: str = "FHKST03010200"
 # --- Flow (optional; sector_loader tolerates empty) ---
 URL_FRGN_INST_TOTAL: str = "/uapi/domestic-stock/v1/quotations/foreign-institution-total"
 TR_FRGN_INST_TOTAL: str = "FHPTJ04400000"
+
+# 종목별 프로그램 매매 추이 (실전; 모의 미지원) — 순매수 거래대금 등
+URL_PROGRAM_TRADE_BY_STOCK: str = "/uapi/domestic-stock/v1/quotations/program-trade-by-stock"
+TR_PROGRAM_TRADE_BY_STOCK: str = "FHPPG04650100"

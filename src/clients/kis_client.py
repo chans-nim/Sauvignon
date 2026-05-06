@@ -58,10 +58,11 @@ class KISClient:
             return token
 
     def get_token(self) -> str:
-        # 토큰 만료 전이면 바로 재사용
-        now = time.time()
-        if self._token and now < self._token_expire_ts:
-            return self._token
+        # 토큰 만료 전이면 바로 재사용 (다중 스레드에서 동시 갱신 방지)
+        with self._lock:
+            now = time.time()
+            if self._token and now < self._token_expire_ts:
+                return self._token
         return self.issue_token()
 
     def refresh_token(self) -> str:

@@ -48,10 +48,22 @@ def stage_release_assets(tag: str) -> list[Path]:
     resolved_tag, src_dir = resolve_tag(tag)
     copied: list[Path] = []
 
-    bundle_files = sorted(
-        p for p in src_dir.glob(f"{resolved_tag}*")
-        if p.is_file()
-    )
+    def _bundle_sort_key(p: Path) -> tuple[int, str]:
+        # 테스트/사용자 출력에서 번들 파일 순서를 안정적으로 유지한다.
+        # - main parquet
+        # - sha256
+        # - manifest json
+        # - 기타 동반자산(있으면 뒤로)
+        name = p.name
+        if name == f"{resolved_tag}.parquet":
+            return (0, name)
+        if name == f"{resolved_tag}.sha256":
+            return (1, name)
+        if name == f"{resolved_tag}.json":
+            return (2, name)
+        return (9, name)
+
+    bundle_files = sorted((p for p in src_dir.glob(f"{resolved_tag}*") if p.is_file()), key=_bundle_sort_key)
     if not bundle_files:
         raise FileNotFoundError(f"missing release asset bundle for tag '{resolved_tag}' in {src_dir}")
     required = {f"{resolved_tag}.parquet", f"{resolved_tag}.sha256", f"{resolved_tag}.json"}

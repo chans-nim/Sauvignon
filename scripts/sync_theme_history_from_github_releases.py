@@ -1,0 +1,218 @@
+"""
+`thema-sector-*` GitHub Release에 첨부된 `theme_snapshot_*.json` 자산을 내려받아
+`data/theme_history/` 를 채운다. CI에서는 수집 전에 실행해 영속 히스토리를 이어 받는다.
+
+태그는 시간순(오래된 것 먼저)으로 처리해, 같은 영업일에 여러 번 릴리즈된 경우
+나중 태그의 스냅샷이 덮어쓴다.
+
+예:
+  python -m scripts.sync_theme_history_from_github_releases --repo owner/Sauvignon
+  python -m scripts.sync_theme_history_from_github_releases --repo owner/Sauvignon --max-releases 45
+"""
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import requests
+
+if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.thema_sector_release_lib import (  # noqa: E402
+    THEMA_SECTOR_TAG_PREFIX,
+    thema_sector_tag_sort_key,
+)
+
+THEME_SNAPSHOT_GLOB = "theme_snapshot_*.json"
+
+
+def parse_repo_from_url(repo_or_url: str) -> str:
+    s = repo_or_url.strip()
+    if "github.com" in s:
+        parts = s.rstrip("/").replace("https://", "").replace("http://", "").split("/")
+        if "github.com" in parts:
+            i = parts.index("github.com")
+            if i + 2 <= len(parts):
+                return f"{parts[i + 1]}/{parts[i + 2]}"
+    return s
+
+
+def github_token() -> str:
+    return (
+        os.getenv("GH_PAT_SAUVIGNON")
+        or os.getenv("GITHUB_TOKEN")
+        or os.getenv("GH_TOKEN")
+        or os.getenv("GH_PAT")
+        or ""
+    ).strip()
+
+
+def github_headers(*, binary: bool = False) -> dict[str, str]:
+    headers: dict[str, str] = {
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Accept": "application/octet-stream" if binary else "application/vnd.github+json",
+    }
+    token = github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def download_asset_by_api(repo: str, asset: dict, dest: Path) -> Path:
+    asset_id = asset.get("id")
+    if not asset_id:
+        raise SystemExit(f"Missing asset id for {asset.get('name')}")
+    url = f"https://api.github.com/repos/{repo}/releases/assets/{asset_id}"
+    with requests.get(url, headers=github_headers(binary=True), stream=True, timeout=300, allow_redirects=True) as r:
+        r.raise_for_status()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    f.write(chunk)
+    return dest
+
+
+def pick_theme_snapshot_asset(assets: list) -> dict | None:
+    matches = [
+        a
+        for a in assets
+        if isinstance(a, dict) and fnmatch.fnmatch(str(a.get("name") or ""), THEME_SNAPSHOT_GLOB)
+    ]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        names = ", ".join(sorted(str(a.get("name")) for a in matches))
+        raise SystemExit(f"Expected one {THEME_SNAPSHOT_GLOB} asset, got: {names}")
+    return matches[0]
+
+
+def http_list_thema_tags(repo: str, *, prefix: str) -> list[str]:
+    tags: list[str] = []
+    url: str | None = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    while url:
+        r = requests.get(url, headers=github_headers(binary=False), timeout=60)
+        r.raise_for_status()
+        for rel in r.json():
+            if not isinstance(rel, dict) or rel.get("draft"):
+                continue
+            t = str(rel.get("tag_name") or "").strip()
+            if t.startswith(prefix):
+                tags.append(t)
+        url = (r.links.get("next") or {}).get("url") or None
+    return tags
+
+
+def gh_list_thema_tags(repo: str, *, prefix: str) -> list[str] | None:
+    try:
+        out = subprocess.check_output(
+            [
+                "gh",
+                "release",
+                "list",
+                "--repo",
+                repo,
+                "--limit",
+                "500",
+                "--exclude-drafts",
+                "--json",
+                "tagName",
+            ],
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        return None
+    try:
+        rows = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    return [str(x.get("tagName") or "").strip() for x in rows if str(x.get("tagName") or "").startswith(prefix)]
+
+
+def list_thema_release_tags(repo: str, *, prefix: str) -> list[str]:
+    tags = gh_list_thema_tags(repo, prefix=prefix)
+    if tags is None:
+        tags = http_list_thema_tags(repo, prefix=prefix)
+    uniq = sorted(set(tags))
+    uniq.sort(key=thema_sector_tag_sort_key)
+    return uniq
+
+
+def fetch_release_assets(repo: str, tag: str) -> list:
+    rel_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    r = requests.get(rel_url, headers=github_headers(binary=False), timeout=30)
+    if r.status_code == 404:
+        return []
+    r.raise_for_status()
+    payload = r.json()
+    return list(payload.get("assets") or [])
+
+
+def sync_theme_snapshots(
+    repo: str,
+    dest_dir: Path,
+    *,
+    prefix: str = THEMA_SECTOR_TAG_PREFIX,
+    max_releases: int,
+) -> int:
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tags = list_thema_release_tags(repo, prefix=prefix)
+    if max_releases > 0:
+        tags = tags[-max_releases:]
+    if not tags:
+        print(f"[sync-theme-history] no releases with tag prefix {prefix!r} in {repo}")
+        return 0
+    print(f"[sync-theme-history] repo={repo} releases={len(tags)} dest={dest_dir}")
+    n = 0
+    for tag in tags:
+        assets = fetch_release_assets(repo, tag)
+        snap = pick_theme_snapshot_asset(assets)
+        if not snap:
+            print(f"[sync-theme-history] skip {tag}: no {THEME_SNAPSHOT_GLOB}")
+            continue
+        name = str(snap.get("name") or "")
+        dest = dest_dir / name
+        download_asset_by_api(repo, snap, dest)
+        print(f"[sync-theme-history] {tag} -> {dest.name}")
+        n += 1
+    return n
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Download theme_snapshot JSONs from thema-sector GitHub releases")
+    parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "chans-nim/Sauvignon"), help="owner/repo")
+    parser.add_argument(
+        "--dest-dir",
+        type=Path,
+        default=Path("data/theme_history"),
+        help="Directory for theme_snapshot_*.json",
+    )
+    parser.add_argument(
+        "--tag-prefix",
+        default=THEMA_SECTOR_TAG_PREFIX,
+        help=f"Release tag prefix (default: {THEMA_SECTOR_TAG_PREFIX!r})",
+    )
+    parser.add_argument(
+        "--max-releases",
+        type=int,
+        default=60,
+        help="Maximum number of matching releases to apply (oldest dropped when over limit; 0 = no limit)",
+    )
+    args = parser.parse_args()
+    repo = parse_repo_from_url(args.repo)
+    prefix = str(args.tag_prefix or THEMA_SECTOR_TAG_PREFIX)
+    if not prefix.endswith("-"):
+        prefix = prefix + "-"
+    n = sync_theme_snapshots(repo, args.dest_dir, prefix=prefix, max_releases=max(0, int(args.max_releases)))
+    print(f"[sync-theme-history] done, downloaded {n} snapshot(s)")
+
+
+if __name__ == "__main__":
+    main()

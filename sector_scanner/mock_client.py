@@ -297,15 +297,22 @@ class MockClient:
     def fetch_foreign_institution_flow(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for sym, meta in self._stocks.items():
+            fn = self._rng.uniform(-400, 700) * 1e9
+            ins = self._rng.uniform(-300, 600) * 1e9
             rows.append(
                 {
                     "symbol": sym,
                     "name": meta["name"],
+                    "foreign_net_tr_pbmn": fn,
+                    "institution_net_tr_pbmn": ins,
                     "foreign_net_strength": self._rng.uniform(-0.4, 0.7),
                     "institution_net_strength": self._rng.uniform(-0.3, 0.6),
                 }
             )
         return rows
+
+    def fetch_program_trade_net_for_symbol(self, symbol: str) -> dict[str, Any]:
+        return {"symbol": symbol, "program_net_tr_pbmn": self._rng.uniform(-50, 120) * 1e9}
 
     def stream_ticks(self, symbols: list[str]) -> Iterator[dict[str, Any]]:
         """심볼별 랜덤 워크 체결 이벤트."""

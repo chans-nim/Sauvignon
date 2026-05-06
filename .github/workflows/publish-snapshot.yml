@@ -199,10 +199,27 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p _tmp
-          echo "Fetching latest release..."
-          LATEST_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
+          echo "Fetching latest data snapshot/full/delta release (skips thema-sector etc.)..."
+          LATEST_TAG=$(python3 - <<'PY'
+          import json, os, re, subprocess
+          pat = re.compile(r"^data-(?:snapshot|full|delta)-\d{8}-\d{4}$")
+          repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+          if not repo:
+              raise SystemExit("GITHUB_REPOSITORY is not set")
+          out = subprocess.check_output(
+              ["gh", "release", "list", "--repo", repo, "--limit", "80", "--exclude-drafts", "--json", "tagName"],
+              text=True,
+          )
+          for row in json.loads(out):
+              t = (row.get("tagName") or "").strip()
+              if pat.match(t):
+                  print(t)
+                  raise SystemExit(0)
+          raise SystemExit("No data-(snapshot|full|delta)-* release found")
+          PY
+          )
           if [ -z "$LATEST_TAG" ]; then
-            echo "No existing release found. Use bootstrap mode first with asset_url."
+            echo "No dataset release found. Use bootstrap mode first with asset_url."
             exit 1
           fi
           echo "Latest release: $LATEST_TAG"

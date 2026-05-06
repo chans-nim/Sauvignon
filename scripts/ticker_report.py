@@ -30,6 +30,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
 
 from src.common.settings import settings
 from src.storage import meta_store
+from scripts.sync_silver_from_github_release import http_latest_dataset_tag, is_dataset_release_tag
 
 SILVER_DIR = settings.project_root / "data" / "lake" / "silver" / "ohlcv_daily"
 RAW_OHLCV_DIR = settings.project_root / "data" / "raw" / "ohlcv"
@@ -261,18 +262,6 @@ def _gh_subprocess_env() -> dict:
     return env
 
 
-def gh_latest_tag(repo: str) -> str:
-    # 최신 1개 태그만
-    out = subprocess.check_output(
-        ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
-        text=True,
-        env=_gh_subprocess_env(),
-    ).strip()
-    if not out:
-        raise SystemExit(f"No releases found in {repo}")
-    return out
-
-
 def release_tag_sort_key(tag: str) -> tuple:
     """data-snapshot-YYYYMMDD-HHMM 등 태그를 비교 가능한 튜플로 변환."""
     m = re.match(r"^data-(?:snapshot|full|delta)-(\d{8})-(\d{4})$", tag)
@@ -281,85 +270,47 @@ def release_tag_sort_key(tag: str) -> tuple:
     return (1, tag, "")
 
 
-def gh_latest_tag_optional(repo: str) -> str | None:
-    """gh 실패·미설치 시 None (manifest 등으로 폴백)."""
+def _gh_latest_dataset_tag_optional_with_pat(repo: str) -> str | None:
+    """gh 호출 시 GH_PAT_SAUVIGNON 을 GH_TOKEN 으로 넘기는 ticker_report 전용."""
     r = parse_repo_from_url(repo)
     try:
         out = subprocess.check_output(
-            ["gh", "release", "list", "--repo", r, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
+            [
+                "gh",
+                "release",
+                "list",
+                "--repo",
+                r,
+                "--limit",
+                "100",
+                "--exclude-drafts",
+                "--json",
+                "tagName",
+            ],
             text=True,
             stderr=subprocess.DEVNULL,
             env=_gh_subprocess_env(),
         ).strip()
     except (FileNotFoundError, subprocess.CalledProcessError, OSError):
         return None
-    return out or None
-
-
-def _github_token_for_api() -> str:
-    return (
-        (os.getenv("GH_PAT_SAUVIGNON") or "").strip()
-        or (os.getenv("GITHUB_TOKEN") or "").strip()
-        or (os.getenv("GH_TOKEN") or "").strip()
-        or (os.getenv("GH_PAT") or "").strip()
-    )
-
-
-def github_latest_release_tag_http(repo: str) -> str | None:
-    """
-    gh CLI 없이 GitHub REST API로 최신 릴리즈 tag_name 조회.
-    (Windows 등에서 gh 미설치인데 PAT만 있는 경우와 동일하게 동작하도록)
-    """
-    import requests
-
-    owner_repo = parse_repo_from_url(repo)
-    headers = {
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Accept": "application/vnd.github+json",
-    }
-    token = _github_token_for_api()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    latest_url = f"https://api.github.com/repos/{owner_repo}/releases/latest"
+    if not out:
+        return None
     try:
-        r = requests.get(latest_url, headers=headers, timeout=30)
-    except OSError:
+        for row in json.loads(out):
+            if not isinstance(row, dict):
+                continue
+            t = str(row.get("tagName") or "").strip()
+            if is_dataset_release_tag(t):
+                return t
+    except (json.JSONDecodeError, TypeError):
         return None
-
-    if r.status_code == 200:
-        data = r.json()
-        if isinstance(data, dict):
-            t = (data.get("tag_name") or "").strip()
-            return t or None
-        return None
-
-    if r.status_code == 404:
-        list_url = f"https://api.github.com/repos/{owner_repo}/releases"
-        try:
-            r2 = requests.get(list_url, headers=headers, timeout=30)
-        except OSError:
-            return None
-        if r2.status_code != 200:
-            return None
-        releases = r2.json()
-        if not isinstance(releases, list) or not releases:
-            return None
-        for rel in releases:
-            if isinstance(rel, dict) and not rel.get("draft") and not rel.get("prerelease"):
-                t = (rel.get("tag_name") or "").strip()
-                if t:
-                    return t
-        rel0 = releases[0]
-        if isinstance(rel0, dict):
-            t = (rel0.get("tag_name") or "").strip()
-            return t or None
     return None
 
 
 def remote_latest_release_tag(repo: str) -> str | None:
-    """gh 우선, 실패 시 HTTP API."""
-    return gh_latest_tag_optional(repo) or github_latest_release_tag_http(repo)
+    """data-snapshot|full|delta 릴리즈만 후보로 삼는다 (thema-sector-* 등 제외)."""
+    r = parse_repo_from_url(repo)
+    return _gh_latest_dataset_tag_optional_with_pat(r) or http_latest_dataset_tag(r)
 
 
 def resolve_default_release_tag(repo: str) -> tuple[str, str | None, bool]:
@@ -379,8 +330,8 @@ def resolve_default_release_tag(repo: str) -> tuple[str, str | None, bool]:
         return gh_tag, None, False
     raise SystemExit(
         "Could not resolve release tag: data_manifest.json has no latest_current and "
-        "GitHub 최신 릴리즈 조회(gh 또는 API)에 실패했습니다. "
-        "--release-tag 를 지정하거나 GH_PAT_SAUVIGNON / gh 인증을 확인하세요."
+        "no data-(snapshot|full|delta)-* release found via gh/API (other tags are skipped). "
+        "Use --release-tag or check GH_PAT_SAUVIGNON / gh auth."
     )
 
 
@@ -510,8 +461,8 @@ def load_release_series(
     """
     GitHub Release 스냅샷 parquet에서 해당 종목 OHLCV 시계열 + 수집·릴리즈 메타를 반환한다.
 
-    기본(--release-tag 없음): 로컬 data_manifest.json 과 `gh release list` 최신 태그 중
-    타임스탬프가 더 새 쪽을 사용한다 (로컬 manifest만 오래된 경우 GitHub 최신을 따름).
+    기본(--release-tag 없음): 로컬 data_manifest.json 과 GitHub의 최신 data-(snapshot|full|delta)-* 태그 중
+    타임스탬프가 더 새 쪽을 사용한다 (thema-sector-* 등 비데이터셋 릴리즈는 후보에서 제외).
     """
     import duckdb
 

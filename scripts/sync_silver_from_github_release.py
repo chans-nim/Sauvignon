@@ -2,6 +2,9 @@
 GitHub Release에 올라간 스냅샷 parquet을 다운로드해서 로컬 silver(ohlcv_daily)에 반영한다.
 이후 incremental/gap_fill/build_snapshot을 돌리기 위한 "베이스 데이터" 동기화 용도.
 
+``--tag`` 미지정 시 원격 "최신"은 ``data-(snapshot|full|delta)-*`` 태그만 본다.
+같은 저장소의 ``thema-sector-*`` 등 다른 릴리즈가 더 최근이어도 무시한다.
+
 요구사항:
 - gh CLI 필요 (GitHub Actions runner에는 기본 제공)
 - 권한: Release asset 다운로드 가능해야 함 (actions에서는 GH_TOKEN 사용)
@@ -106,27 +109,82 @@ def load_manifest_tag(path: Path = MANIFEST_PATH) -> str | None:
     return None
 
 
+DATASET_RELEASE_TAG_RE = re.compile(r"^data-(?:snapshot|full|delta)-(\d{8})-(\d{4})$")
+
+
+def is_dataset_release_tag(tag: str) -> bool:
+    """Silver/스냅샷 동기화 대상 태그만 true (thema-sector-* 등 다른 릴리즈는 제외)."""
+    return bool(DATASET_RELEASE_TAG_RE.match(str(tag).strip()))
+
+
 def release_tag_sort_key(tag: str) -> tuple:
-    m = re.match(r"^data-(?:snapshot|full|delta)-(\d{8})-(\d{4})$", str(tag))
+    m = DATASET_RELEASE_TAG_RE.match(str(tag))
     if m:
         return (0, m.group(1), m.group(2))
     return (1, str(tag), "")
 
 
-def gh_latest_tag(repo: str) -> str:
-    # 최신 1개 태그만 (gh 우선, 실패 시 HTTP API)
+def http_latest_dataset_tag(repo: str) -> str | None:
+    """API 릴리즈 목록에서 가장 최근의 data-snapshot|full|delta 태그."""
+    url: str | None = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    while url:
+        r = requests.get(url, headers=github_headers(binary=False), timeout=30)
+        r.raise_for_status()
+        batch = r.json()
+        if not isinstance(batch, list):
+            break
+        for rel in batch:
+            if not isinstance(rel, dict) or rel.get("draft") or rel.get("prerelease"):
+                continue
+            t = str(rel.get("tag_name") or "").strip()
+            if is_dataset_release_tag(t):
+                return t
+        url = (r.links.get("next") or {}).get("url") or None
+    return None
+
+
+def _try_gh_list_latest_dataset_tag(repo: str) -> str | None:
     try:
         out = subprocess.check_output(
-            ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "-q", ".[0].tagName"],
+            [
+                "gh",
+                "release",
+                "list",
+                "--repo",
+                repo,
+                "--limit",
+                "100",
+                "--exclude-drafts",
+                "--json",
+                "tagName",
+            ],
             text=True,
         ).strip()
-        if out:
-            return out
-    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
-        pass
-    out = http_latest_tag(repo)
+        if not out:
+            return None
+        for row in json.loads(out):
+            if not isinstance(row, dict):
+                continue
+            t = str(row.get("tagName") or "").strip()
+            if is_dataset_release_tag(t):
+                return t
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError, json.JSONDecodeError, TypeError):
+        return None
+    return None
+
+
+def gh_latest_dataset_tag_optional(repo: str) -> str | None:
+    return _try_gh_list_latest_dataset_tag(repo) or http_latest_dataset_tag(repo)
+
+
+def gh_latest_dataset_tag(repo: str) -> str:
+    """최신 data-snapshot|full|delta 릴리즈 태그 (thema-sector 등 비데이터셋 릴리즈는 건너뜀)."""
+    out = gh_latest_dataset_tag_optional(repo)
     if not out:
-        raise SystemExit(f"No releases found in {repo}")
+        raise SystemExit(
+            f"No data-(snapshot|full|delta)-* releases found in {repo} "
+            "(non-dataset releases, e.g. thema-sector-*, are ignored for silver sync)."
+        )
     return out
 
 
@@ -149,31 +207,6 @@ def github_headers(*, binary: bool = False) -> dict[str, str]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
-
-
-def http_latest_tag(repo: str) -> str | None:
-    latest_url = f"https://api.github.com/repos/{repo}/releases/latest"
-    r = requests.get(latest_url, headers=github_headers(binary=False), timeout=30)
-    if r.status_code == 200:
-        payload = r.json()
-        tag = str(payload.get("tag_name") or "").strip()
-        return tag or None
-    if r.status_code == 404:
-        list_url = f"https://api.github.com/repos/{repo}/releases"
-        r2 = requests.get(list_url, headers=github_headers(binary=False), timeout=30)
-        r2.raise_for_status()
-        releases = r2.json()
-        if not releases:
-            return None
-        for rel in releases:
-            if not rel.get("draft") and not rel.get("prerelease"):
-                tag = str(rel.get("tag_name") or "").strip()
-                if tag:
-                    return tag
-        tag = str((releases[0] or {}).get("tag_name") or "").strip()
-        return tag or None
-    r.raise_for_status()
-    return None
 
 
 def gh_download_release_assets(repo: str, tag: str, out_dir: Path) -> tuple[Path, Path | None]:
@@ -245,7 +278,7 @@ def resolve_default_tag(repo: str) -> str:
     --tag 미지정 시, 로컬 manifest와 원격 최신 릴리즈 중 더 최신 태그를 선택한다.
     """
     manifest_tag = load_manifest_tag()
-    remote_tag = gh_latest_tag(repo)
+    remote_tag = gh_latest_dataset_tag(repo)
     if manifest_tag and remote_tag:
         if release_tag_sort_key(remote_tag) > release_tag_sort_key(manifest_tag):
             print(f"[sync] note: manifest tag={manifest_tag} is older than remote latest={remote_tag}; using remote latest")

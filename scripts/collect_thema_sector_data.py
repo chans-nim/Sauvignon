@@ -6,8 +6,16 @@ Thema 대분류/중분류 기반 섹터 리포트 생성기.
 예시:
   python -m scripts.collect_thema_sector_data
   python -m scripts.collect_thema_sector_data --mode real --classification-json "C:/Users/me/Downloads/thema_major_middle_stock_classification_dup_allowed.json"
-  python -m scripts.collect_thema_sector_data --quote-enrichment
+  python -m scripts.collect_thema_sector_data --no-quote-enrichment
+  python -m scripts.collect_thema_sector_data --full-quote-enrichment
   python -m scripts.collect_thema_sector_data --mode real --telegram
+
+기본은 **2단계**다. (1) 분류 **전 구성주**에 KIS **현재가(등락·거래대금)** 만 병렬 조회한 뒤, 라이브 랭킹·순위 수급·JSON 시총과 합쳐 **전 그룹을 탐색**해 섹터(대/중분류)마다 RS 상위 **top N**(기본 5)을 뽑고,
+(2) 그 **선정 종목**에만 **프로그램**(및 순위에 없을 때 종목별 수급)까지 포함한 보강을 추가 호출한다(선정 종목 시세는 재조회될 수 있음).
+`--full-quote-enrichment` 는 1차 프로브 생략·전 구성주에 2차와 동일 풀보강. 경량만 필요하면 `--no-quote-enrichment`.
+병렬도는 `--enrichment-workers`(기본 4)로 조절한다. 순위 API로 외국인·기관이 이미 채워지면 종목당 2회(시세·프로그램)만 호출한다.
+
+외국인·기관 순매수 거래대금은 **순위 API 한 번**으로 합산·표시(순위에 없거나 코드 불일치 시 `-`).
 
 분류 JSON는 `~/Downloads/...` 대신 `data/lake/sector/thema_major_middle_stock_classification_dup_allowed.json` 에 두어도 기본 인자로 인식한다.
 """
@@ -15,10 +23,14 @@ Thema 대분류/중분류 기반 섹터 리포트 생성기.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import math
 import os
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -36,12 +48,24 @@ from scripts.collect_sector_data import (
     _send_telegram_document,
     _send_telegram_message,
 )
+
+
+def _fmt_signed_eok(x: Any) -> str:
+    """순매수 금액(원 등)을 억 단위 표기, 부호 유지."""
+    if x is None:
+        return "-"
+    try:
+        v = float(x) / 100_000_000.0
+    except Exception:
+        return "-"
+    return f"{v:+,.1f}"
 from sector_scanner.kis_client import build_kis_client_for_mode
 
 
 _CLASSIFICATION_BASENAME = "thema_major_middle_stock_classification_dup_allowed.json"
 DEFAULT_CLASSIFICATION_JSON = Path.home() / "Downloads" / _CLASSIFICATION_BASENAME
 DEFAULT_OUTPUT_DIR = Path("data/lake/sector/thema_major_middle")
+DEFAULT_THEME_HISTORY_DIR = Path("data/theme_history")
 
 # `relative_strength_score` = 주도·실시간 기준(등락·거래대금) 비중이 크도록, RS(합성)는 보조. 합 1.0, 코호트=동일 대/중 그룹끼리
 GROUP_SCORE_W_REP_RETURN_COHORT = 0.26  # 대표(top_n) 평균 등락 백분위
@@ -87,6 +111,409 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _clip(x: float, lo: float, hi: float) -> float:
+    return max(float(lo), min(float(hi), float(x)))
+
+
+def _round1(x: Any) -> float | None:
+    if x is None:
+        return None
+    try:
+        return round(float(x), 1)
+    except Exception:
+        return None
+
+
+def _parse_iso_date(s: str) -> str | None:
+    """
+    collected_at(예: 2026-05-06T21:10:00+09:00)에서 YYYY-MM-DD를 뽑는다.
+    """
+    st = str(s or "").strip()
+    if len(st) >= 10 and st[4] == "-" and st[7] == "-":
+        return st[:10]
+    return None
+
+
+def _date_yyyymmdd(d: str) -> str:
+    return str(d).replace("-", "")
+
+
+def classify_theme_quality(persistence_score: float | None, breadth_score: float | None) -> str:
+    if persistence_score is None or breadth_score is None:
+        return "데이터부족"
+    p = float(persistence_score)
+    b = float(breadth_score)
+    if p >= 70 and b >= 70:
+        return "주도테마"
+    if p >= 70 and b < 50:
+        return "대장주 편중"
+    if p < 50 and b >= 70:
+        return "단기 순환매"
+    if p >= 50 and b >= 50:
+        return "관심테마"
+    return "약세/제외"
+
+
+def _calc_simple_slope(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    return (float(values[-1]) - float(values[0])) / float(len(values) - 1)
+
+
+def calculate_persistence_score(
+    current_group: dict[str, Any],
+    history_rows: list[dict[str, Any]],
+    group_key: tuple[str, str | None],
+) -> dict[str, Any]:
+    """
+    특정 대분류/중분류의 최근 5일, 10일, 20일 데이터를 기반으로 persistence_score 및 세부 지표를 계산한다.
+
+    history_rows: 동일 group_type 코호트의 "theme snapshot row" 들(여러 날짜 섞임).
+    group_key: (major_category, middle_category)
+    """
+    major, middle = group_key
+
+    def _match(r: dict[str, Any]) -> bool:
+        return str(r.get("major_category") or "") == str(major or "") and (r.get("middle_category") == middle)
+
+    rows = [r for r in (history_rows or []) if isinstance(r, dict) and _match(r)]
+    # date desc (string YYYY-MM-DD)
+    rows.sort(key=lambda r: str(r.get("date") or ""), reverse=True)
+
+    # prepend current row as "today"
+    cur = dict(current_group or {})
+    cur_date = str(cur.get("date") or "").strip()
+    if cur_date:
+        rows = [cur] + [r for r in rows if str(r.get("date") or "") != cur_date]
+    else:
+        rows = [cur] + rows
+
+    def _take(n: int) -> list[dict[str, Any]]:
+        return rows[: max(0, int(n))]
+
+    last5 = _take(5)
+    last10 = _take(10)
+    last20 = _take(20)
+
+    if len(last5) < 5:
+        return {
+            "persistence_score": None,
+            "rank_top3_days_5d": 0,
+            "rank_top5_days_10d": 0,
+            "rs_avg_5d": None,
+            "rs_avg_10d": None,
+            "rs_slope_5d": None,
+            "value_ratio_5d_20d": None,
+        }
+
+    rs5 = [float(r.get("theme_rs") or 0.0) for r in last5]
+    rs10 = [float(r.get("theme_rs") or 0.0) for r in last10] if last10 else []
+
+    rs_avg_5d = sum(rs5) / len(rs5) if rs5 else 0.0
+    rs_avg_10d = (sum(rs10) / len(rs10)) if rs10 else None
+    rs_slope_5d = _calc_simple_slope(rs5)
+
+    top3 = sum(1 for r in last5 if 1 <= int(r.get("theme_rank") or 10_000) <= 3)
+    top5_10d = sum(1 for r in last10 if 1 <= int(r.get("theme_rank") or 10_000) <= 5)
+
+    val5 = [float(r.get("total_value_traded") or 0.0) for r in last5]
+    val20 = [float(r.get("total_value_traded") or 0.0) for r in last20]
+    avg5 = (sum(val5) / len(val5)) if val5 else 0.0
+    avg20 = (sum(val20) / len(val20)) if val20 else 0.0
+
+    if avg20 <= 0:
+        value_ratio_5d_20d = None
+        value_persistence_score = 50.0
+    else:
+        value_ratio_5d_20d = avg5 / avg20
+        if value_ratio_5d_20d >= 2.0:
+            value_persistence_score = 100.0
+        elif value_ratio_5d_20d >= 1.5:
+            value_persistence_score = 80.0
+        elif value_ratio_5d_20d >= 1.2:
+            value_persistence_score = 60.0
+        elif value_ratio_5d_20d >= 1.0:
+            value_persistence_score = 40.0
+        else:
+            value_persistence_score = 20.0
+
+    rs_avg_5d_score = _clip(rs_avg_5d, 0.0, 100.0)
+    rank_persistence_score = float(top3) / 5.0 * 100.0
+
+    persistence = 0.40 * rs_avg_5d_score + 0.30 * rank_persistence_score + 0.30 * float(value_persistence_score)
+    return {
+        "persistence_score": round(float(persistence), 1),
+        "rank_top3_days_5d": int(top3),
+        "rank_top5_days_10d": int(top5_10d),
+        "rs_avg_5d": round(float(rs_avg_5d), 1),
+        "rs_avg_10d": round(float(rs_avg_10d), 1) if rs_avg_10d is not None else None,
+        "rs_slope_5d": round(float(rs_slope_5d), 2) if rs_slope_5d is not None else None,
+        "value_ratio_5d_20d": round(float(value_ratio_5d_20d), 2) if value_ratio_5d_20d is not None else None,
+    }
+
+
+def calculate_breadth_score(
+    *,
+    member_count: int,
+    rs60_ratio: float | None,
+    rs70_ratio: float | None,
+    up_ratio: float | None,
+    market_up_ratio: float | None,
+    value_expansion_ratio: float | None,
+) -> dict[str, Any]:
+    if member_count <= 0:
+        return {
+            "breadth_score": None,
+            "rs60_ratio": 0.0,
+            "rs70_ratio": 0.0,
+            "up_ratio": 0.0,
+            "market_up_ratio": market_up_ratio,
+            "relative_up_ratio": None,
+            "value_expansion_ratio": 0.0,
+        }
+
+    r60 = float(rs60_ratio or 0.0)
+    r70 = float(rs70_ratio or 0.0)
+    upr = float(up_ratio or 0.0)
+    mkt = float(market_up_ratio or 0.0) if market_up_ratio is not None else None
+    rel = (upr - float(mkt)) if mkt is not None else None
+    vex = float(value_expansion_ratio or 0.0) if value_expansion_ratio is not None else None
+
+    rs60_score = min(r60 / 0.30, 1.0) * 100.0
+    relative_up_score = _clip(((float(rel or 0.0) + 0.20) / 0.40) * 100.0, 0.0, 100.0) if rel is not None else 50.0
+    value_expansion_score = (min(float(vex) / 0.25, 1.0) * 100.0) if vex is not None else 50.0
+
+    breadth = 0.40 * float(rs60_score) + 0.30 * float(relative_up_score) + 0.30 * float(value_expansion_score)
+    return {
+        "breadth_score": round(float(breadth), 1),
+        "rs60_ratio": round(float(r60), 3),
+        "rs70_ratio": round(float(r70), 3),
+        "up_ratio": round(float(upr), 3),
+        "market_up_ratio": round(float(mkt), 3) if mkt is not None else None,
+        "relative_up_ratio": round(float(rel), 3) if rel is not None else None,
+        "value_expansion_ratio": round(float(vex), 3) if vex is not None else None,
+    }
+
+
+def _theme_history_snapshot_path(history_dir: Path, date_yyyy_mm_dd: str) -> Path:
+    return Path(history_dir) / f"theme_snapshot_{_date_yyyymmdd(date_yyyy_mm_dd)}.json"
+
+
+def _load_theme_history_rows(history_dir: Path, *, max_days: int = 30) -> list[dict[str, Any]]:
+    """
+    data/theme_history/theme_snapshot_YYYYMMDD.json 을 여러 개 읽어 단일 row list로 평탄화.
+    """
+    hd = Path(history_dir)
+    if not hd.exists():
+        return []
+    files = sorted(hd.glob("theme_snapshot_*.json"), key=lambda p: p.name, reverse=True)
+    rows: list[dict[str, Any]] = []
+    for p in files[: max(0, int(max_days))]:
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+            for r in payload["rows"]:
+                if isinstance(r, dict):
+                    rows.append(r)
+        elif isinstance(payload, list):
+            for r in payload:
+                if isinstance(r, dict):
+                    rows.append(r)
+    return rows
+
+
+def _write_theme_history_snapshot(history_dir: Path, *, date_yyyy_mm_dd: str, rows: list[dict[str, Any]]) -> Path:
+    hd = Path(history_dir)
+    hd.mkdir(parents=True, exist_ok=True)
+    path = _theme_history_snapshot_path(hd, date_yyyy_mm_dd)
+    payload = {
+        "date": date_yyyy_mm_dd,
+        "rows": rows,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _silver_parquet_paths() -> list[str]:
+    # reuse project default: data/lake/silver/ohlcv_daily/**/data.parquet
+    root = Path(__file__).resolve().parent.parent
+    silver_dir = root / "data" / "lake" / "silver" / "ohlcv_daily"
+    if not silver_dir.exists():
+        return []
+    return [p.as_posix() for p in silver_dir.rglob("data.parquet")]
+
+
+def _load_symbol_value_averages(symbols: list[str], *, lookback_days: int = 30) -> dict[str, dict[str, float]]:
+    """
+    Silver OHLCV(일봉)에서 종목별 value(거래대금) 최근 N일을 읽어, avg5/avg20 을 계산한다.
+    반환: {symbol: {"avg5": ..., "avg20": ...}}
+    """
+    syms = sorted({_norm_kis_stock_symbol(s) for s in (symbols or []) if _norm_kis_stock_symbol(s)})
+    if not syms:
+        return {}
+    paths = _silver_parquet_paths()
+    if not paths:
+        return {}
+    try:
+        import duckdb  # type: ignore
+    except Exception:
+        return {}
+    con = duckdb.connect()
+    try:
+        # 최근 lookback_days를 "행 기준"으로 맞추기 위해, symbol별 최근 N개를 window로 자른다.
+        df = con.execute(
+            """
+            WITH base AS (
+              SELECT
+                symbol,
+                CAST(date AS DATE) AS d,
+                CAST(value AS DOUBLE) AS value
+              FROM read_parquet(?)
+              WHERE symbol IN (SELECT * FROM UNNEST(?))
+            ),
+            ranked AS (
+              SELECT
+                symbol,
+                d,
+                value,
+                ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
+              FROM base
+              WHERE value IS NOT NULL
+            )
+            SELECT symbol, d, value, rn
+            FROM ranked
+            WHERE rn <= ?
+            """,
+            [paths, syms, int(lookback_days)],
+        ).fetchdf()
+    finally:
+        con.close()
+    if df is None or getattr(df, "empty", True):
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for sym in syms:
+        sub = df[df["symbol"] == sym].sort_values("d", ascending=False)
+        vals = [float(x) for x in list(sub["value"].values) if float(x) > 0.0]
+        if not vals:
+            continue
+        avg5 = sum(vals[:5]) / min(5, len(vals))
+        avg20 = sum(vals[:20]) / min(20, len(vals))
+        out[sym] = {"avg5": float(avg5), "avg20": float(avg20)}
+    return out
+
+
+def _norm_kis_stock_symbol(sym: str | None) -> str:
+    """종목 코드를 KIS/JSON 간 공통 형식(숫자 6자리)으로 맞춘다."""
+    s = str(sym or "").strip()
+    return s.zfill(6) if s.isdigit() else s
+
+
+def _build_investor_by_symbol(flow_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """KIS 외국인·기관 종합 순위 한 번 조회 결과 → 심별 집합."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in flow_rows or []:
+        if not isinstance(row, dict):
+            continue
+        sym = _norm_kis_stock_symbol(row.get("symbol", ""))
+        if not sym:
+            continue
+        out[sym] = {
+            "foreign_net_tr_pbmn": row.get("foreign_net_tr_pbmn"),
+            "institution_net_tr_pbmn": row.get("institution_net_tr_pbmn"),
+        }
+    return out
+
+
+def _fetch_quote_enrichment_concurrent(
+    client: Any,
+    symbols: list[str],
+    *,
+    fetch_investor_per_symbol: bool,
+    max_workers: int = 4,
+    fetch_program: bool = True,
+    log_label: str = "[enrichment]",
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """
+    종목별 시세·(옵션)외국인·기관·(옵션)프로그램을 한 번에 조회한다.
+    스레드 풀 + KISClient 의 요청-시작 간격 스로틀(HTTP는 겹침)로 순차 3패스 대비 wall time 을 줄인다.
+    fetch_program=False 이면 프로그램 TR 만 생략(1차 최소 시세용).
+    """
+    quotes_by_symbol: dict[str, dict[str, Any]] = {}
+    investor_out: dict[str, dict[str, Any]] = {}
+    program_by_symbol: dict[str, dict[str, Any]] = {}
+
+    total = len(symbols)
+    if total <= 0:
+        return quotes_by_symbol, investor_out, program_by_symbol
+
+    workers = max(1, min(int(max_workers), 32, total))
+    lock = threading.Lock()
+    done_holder: list[int] = [0]
+    t0 = time.perf_counter()
+
+    def _one(sym_raw: str) -> None:
+        sym = _norm_kis_stock_symbol(sym_raw)
+        quote: dict[str, Any] = {}
+        try:
+            q = client.fetch_stock_price(sym)
+            if isinstance(q, dict) and q:
+                quote = q
+        except Exception:
+            pass
+
+        inv: dict[str, Any] = {}
+        if fetch_investor_per_symbol:
+            try:
+                if hasattr(client, "fetch_foreign_institution_for_symbol"):
+                    d = client.fetch_foreign_institution_for_symbol(sym)
+                    if isinstance(d, dict):
+                        inv = d
+            except Exception:
+                pass
+
+        prog_val: dict[str, Any] = {}
+        if fetch_program:
+            try:
+                if hasattr(client, "fetch_program_trade_net_for_symbol"):
+                    d = client.fetch_program_trade_net_for_symbol(sym)
+                    if isinstance(d, dict) and d.get("program_net_tr_pbmn") is not None:
+                        prog_val = {"program_net_tr_pbmn": d.get("program_net_tr_pbmn")}
+            except Exception:
+                pass
+
+        with lock:
+            if quote:
+                quotes_by_symbol[sym] = quote
+            if fetch_investor_per_symbol and (
+                inv.get("foreign_net_tr_pbmn") is not None or inv.get("institution_net_tr_pbmn") is not None
+            ):
+                investor_out[sym] = {
+                    "foreign_net_tr_pbmn": inv.get("foreign_net_tr_pbmn"),
+                    "institution_net_tr_pbmn": inv.get("institution_net_tr_pbmn"),
+                }
+            if prog_val:
+                program_by_symbol[sym] = prog_val
+            done_holder[0] += 1
+            n = done_holder[0]
+        if n % 25 == 0 or n == total:
+            elapsed = time.perf_counter() - t0
+            extra = ""
+            if 0 < n < total and elapsed > 0.05:
+                eta = (elapsed / n) * (total - n)
+                extra = f"  eta~{eta:.0f}s"
+            print(f"{log_label} {n}/{total}  {elapsed:.1f}s{extra}")
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(_one, s) for s in symbols]
+        for fut in as_completed(futures):
+            fut.result()
+
+    print(f"{log_label} done  {total} symbols  {time.perf_counter() - t0:.1f}s  (workers={workers})")
+    return quotes_by_symbol, investor_out, program_by_symbol
+
+
 def _load_classification_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -101,7 +528,7 @@ def _normalize_stock(raw: dict[str, Any], *, major: str, middle: str) -> dict[st
         if val not in (None, ""):
             per_values.append(_safe_float(val))
     return {
-        "symbol": str(raw.get("stockCode", "")).strip(),
+        "symbol": _norm_kis_stock_symbol(raw.get("stockCode", "")),
         "name": str(raw.get("stockName", "")).strip(),
         "market_cap_eok": _safe_float(raw.get("marketCap"), 0.0),
         "per_values": per_values,
@@ -113,7 +540,7 @@ def _normalize_stock(raw: dict[str, Any], *, major: str, middle: str) -> dict[st
 def _dedupe_stocks(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for stock in stocks:
-        sym = str(stock.get("symbol", "")).strip()
+        sym = _norm_kis_stock_symbol(stock.get("symbol", ""))
         if not sym:
             continue
         prev = out.get(sym)
@@ -195,12 +622,12 @@ def _position_score_map(rows: list[dict[str, Any]]) -> dict[str, float]:
     if total <= 0:
         return out
     if total == 1:
-        sym = str(rows[0].get("symbol", "")).strip()
+        sym = _norm_kis_stock_symbol(rows[0].get("symbol", ""))
         if sym:
             out[sym] = 100.0
         return out
     for idx, row in enumerate(rows):
-        sym = str(row.get("symbol", "")).strip()
+        sym = _norm_kis_stock_symbol(row.get("symbol", ""))
         if not sym:
             continue
         out[sym] = round(100.0 * (total - 1 - idx) / (total - 1), 2)
@@ -220,7 +647,7 @@ def _build_live_signal_map(client) -> dict[str, dict[str, Any]]:
             continue
         score_map = _position_score_map(rows)
         for row in rows:
-            sym = str(row.get("symbol", "")).strip()
+            sym = _norm_kis_stock_symbol(row.get("symbol", ""))
             if not sym:
                 continue
             entry = signal_map.setdefault(
@@ -242,56 +669,146 @@ def _build_live_signal_map(client) -> dict[str, dict[str, Any]]:
     return signal_map
 
 
+def _all_unique_stock_symbols_from_groups(groups: list[dict[str, Any]]) -> list[str]:
+    """대·중분류 블루프린트에 등장하는 구성주 심볼(중복 제거, 정렬)."""
+    out: set[str] = set()
+    for group in groups:
+        for stock in group.get("stocks") or []:
+            if not isinstance(stock, dict):
+                continue
+            sym = _norm_kis_stock_symbol(stock.get("symbol", ""))
+            if sym:
+                out.add(sym)
+    return sorted(out)
+
+
+def _probe_top_symbols_per_group(
+    groups: list[dict[str, Any]],
+    live_signal_map: dict[str, dict[str, Any]],
+    *,
+    top_n: int,
+    investor_by_symbol: dict[str, dict[str, Any]] | None = None,
+    program_by_symbol: dict[str, dict[str, Any]] | None = None,
+    quotes_by_symbol: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    """
+    그룹 내 RS를 매겨 각 그룹에서 상위 top_n 종목 코드를 모은 뒤 중복 제거해 정렬해 반환한다.
+    quotes_by_symbol 이 있으면 등락·거래대금 등 시세 기반 RS 항이 반영된다(없으면 라이브·시총·수급 위주).
+    """
+    n = max(1, int(top_n))
+    inv = investor_by_symbol or {}
+    prog = program_by_symbol or {}
+    qmap = dict(quotes_by_symbol or {})
+    t0 = time.perf_counter()
+    n_major = sum(1 for g in groups if str(g.get("group_type") or "") == "major")
+    n_middle = sum(1 for g in groups if str(g.get("group_type") or "") == "middle")
+    n_member_total = sum(len(list(g.get("stocks") or [])) for g in groups)
+    n_quote_seed = len(qmap)
+    print(
+        "[probe] 1차 전체 탐색·프로브 시작 — "
+        f"그룹 {len(groups)}개(대분류 {n_major} / 중분류 {n_middle}), "
+        f"구성주 합계(중복 포함) {n_member_total}종, top_n={n}, "
+        f"시세 맵(프로브 입력) {n_quote_seed}종, "
+        f"라이브 랭킹 심볼 {len(live_signal_map)}개, "
+        f"순위 수급 맵 {len(inv)}종"
+        + (f", 프로그램 맵(프로브) {len(prog)}종" if prog else "")
+    )
+    out: set[str] = set()
+    skipped_empty = 0
+    progress_every = 50
+    for gi, group in enumerate(groups, start=1):
+        stocks = list(group.get("stocks") or [])
+        if not stocks:
+            skipped_empty += 1
+            continue
+        if len(groups) > progress_every and gi % progress_every == 0:
+            print(f"[probe] 진행 {gi}/{len(groups)} 그룹…  누적 선정 심볼 {len(out)}개  {time.perf_counter() - t0:.2f}s")
+        scored = _score_group_members(
+            stocks,
+            qmap,
+            live_signal_map,
+            investor_by_symbol=inv,
+            program_by_symbol=prog,
+        )
+        for row in scored[:n]:
+            sym = _norm_kis_stock_symbol(str(row.get("symbol", "") or ""))
+            if sym:
+                out.add(sym)
+    elapsed = time.perf_counter() - t0
+    print(
+        "[probe] 1차 완료 — "
+        f"{elapsed:.2f}s  "
+        f"시세·프로그램 API 예정 심볼 {len(out)}개(그룹별 상위 top_n 합집합·중복 제거)"
+        + (f"  구성 0종 스킵 그룹 {skipped_empty}개" if skipped_empty else "")
+    )
+    return sorted(out)
+
+
 def _select_quote_symbols(
     groups: list[dict[str, Any]],
     live_signal_map: dict[str, dict[str, Any]],
     *,
     top_n: int,
     market_cap_fallback: int = 5,
+    enrichment_mode: str = "top_by_group",
+    investor_by_symbol: dict[str, dict[str, Any]] | None = None,
+    program_by_symbol: dict[str, dict[str, Any]] | None = None,
+    probe_quotes: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    symbols: set[str] = set(live_signal_map.keys())
-    fallback_n = max(int(top_n), int(market_cap_fallback))
-    for group in groups:
-        stocks = sorted(
-            list(group.get("stocks") or []),
-            key=lambda x: (
-                -float(x.get("market_cap_eok", 0.0)),
-                str(x.get("name", "")),
-                str(x.get("symbol", "")),
-            ),
+    """
+    시세·프로그램 등 종목별 보강 API 호출 대상 심볼 목록.
+    - enrichment_mode == 'top_by_group'(기본): 프로브 RS로 그룹당 top_n만 (대·중분류 각각).
+    - enrichment_mode == 'all': 라이브 맵 키 + 모든 그룹 구성주 (기존 전체 보강).
+    """
+    if enrichment_mode == "all":
+        print(
+            "[probe] 1차 프로브 생략 — enrichment_mode=all "
+            "(전 구성주 + 라이브 랭킹 심볼에 시세·프로그램 보강)"
         )
-        for stock in stocks[:fallback_n]:
-            sym = str(stock.get("symbol", "")).strip()
-            if sym:
-                symbols.add(sym)
-    return sorted(symbols)
-
-
-def _fetch_quotes(client, symbols: list[str]) -> dict[str, dict[str, Any]]:
-    quotes: dict[str, dict[str, Any]] = {}
-    total = len(symbols)
-    for idx, sym in enumerate(symbols, start=1):
-        try:
-            quote = client.fetch_stock_price(sym)
-        except Exception:
-            quote = {}
-        if isinstance(quote, dict) and quote:
-            quotes[sym] = quote
-        if idx % 25 == 0 or idx == total:
-            print(f"[quotes] fetched {idx}/{total}")
-    return quotes
+        symbols: set[str] = {_norm_kis_stock_symbol(s) for s in live_signal_map.keys() if _norm_kis_stock_symbol(s)}
+        fallback_n = max(int(top_n), int(market_cap_fallback))
+        for group in groups:
+            stocks = list(group.get("stocks") or [])
+            _ = fallback_n
+            for stock in stocks:
+                sym = _norm_kis_stock_symbol(stock.get("symbol", ""))
+                if sym:
+                    symbols.add(sym)
+        out_all = sorted(symbols)
+        print(
+            f"[probe] all 모드 시세 대상 요약 — "
+            f"고유 심볼 {len(out_all)}개 (라이브 키·전 그룹 구성주 합집합)"
+        )
+        return out_all
+    if enrichment_mode != "top_by_group":
+        raise ValueError(f"unknown enrichment_mode: {enrichment_mode!r}")
+    return _probe_top_symbols_per_group(
+        groups,
+        live_signal_map,
+        top_n=top_n,
+        investor_by_symbol=investor_by_symbol,
+        program_by_symbol=program_by_symbol,
+        quotes_by_symbol=probe_quotes,
+    )
 
 
 def _score_group_members(
     stocks: list[dict[str, Any]],
     quotes_by_symbol: dict[str, dict[str, Any]],
     live_signal_map: dict[str, dict[str, Any]],
+    *,
+    investor_by_symbol: dict[str, dict[str, Any]] | None = None,
+    program_by_symbol: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    inv = investor_by_symbol or {}
+    prog = program_by_symbol or {}
     rows: list[dict[str, Any]] = []
     for stock in stocks:
-        sym = str(stock.get("symbol", "")).strip()
+        sym = _norm_kis_stock_symbol(stock.get("symbol", ""))
         quote = dict(quotes_by_symbol.get(sym) or {})
         live = dict(live_signal_map.get(sym) or {})
+        iv = dict(inv.get(sym) or {})
+        pg = dict(prog.get(sym) or {})
         rows.append(
             {
                 "symbol": sym,
@@ -301,6 +818,9 @@ def _score_group_members(
                 "return_pct": quote.get("return_pct"),
                 "value_traded": quote.get("value_traded"),
                 "volume": quote.get("volume"),
+                "foreign_net_tr_pbmn": iv.get("foreign_net_tr_pbmn"),
+                "institution_net_tr_pbmn": iv.get("institution_net_tr_pbmn"),
+                "program_net_tr_pbmn": pg.get("program_net_tr_pbmn"),
                 "live_signal_score": float(live.get("live_signal_score", 0.0)),
                 "live_signal_sources": dict(live.get("source_scores") or {}),
                 "source_count": int(live.get("source_count", 0)),
@@ -372,8 +892,26 @@ def _build_group_metrics(group: dict[str, Any], members: list[dict[str, Any]], t
     top_avg_return = (sum(top_return_vals) / len(top_return_vals)) if top_return_vals else None
     top_value_share = (max(top_value_traded) / sum(top_value_traded)) if top_value_traded and sum(top_value_traded) > 0 else None
     top_members_value_sum = float(sum(top_value_traded)) if top_value_traded else 0.0
+    total_value_traded = float(sum(_safe_float(m.get("value_traded"), 0.0) for m in members if _safe_float(m.get("value_traded"), 0.0) > 0.0))
     per_values = [x for stock in list(group.get("stocks") or []) for x in list(stock.get("per_values") or [])]
     avg_per = (sum(per_values) / len(per_values)) if per_values else None
+    up_ratio = (
+        (sum(1 for m in members if m.get("return_pct") is not None and float(m.get("return_pct") or 0.0) > 0.0) / len(members))
+        if members
+        else 0.0
+    )
+    rs60_ratio = (sum(1 for v in rs_values if v >= 60.0) / len(rs_values)) if rs_values else 0.0
+    rs70_ratio = (sum(1 for v in rs_values if v >= 70.0) / len(rs_values)) if rs_values else 0.0
+
+    def _pbmn_sum_eok(mems: list[dict[str, Any]], key: str) -> float | None:
+        parts: list[float] = []
+        for m in mems:
+            v = m.get(key)
+            if v is None:
+                continue
+            parts.append(float(v))
+        return round(sum(parts) / 100_000_000.0, 1) if parts else None
+
     return {
         "weighted_rs": round(weighted_rs, 2),
         "avg_rs": round(sum(rs_values) / len(rs_values), 2) if rs_values else 0.0,
@@ -383,6 +921,10 @@ def _build_group_metrics(group: dict[str, Any], members: list[dict[str, Any]], t
         "market_cap_total_eok": round(total_cap, 1),
         "market_cap_log": math.log10(total_cap + 1.0),
         "top_members_value_sum": round(top_members_value_sum, 0),
+        "total_value_traded": round(total_value_traded, 0),
+        "top_members_foreign_net_eok_sum": _pbmn_sum_eok(top_members, "foreign_net_tr_pbmn"),
+        "top_members_institution_net_eok_sum": _pbmn_sum_eok(top_members, "institution_net_tr_pbmn"),
+        "top_members_program_net_eok_sum": _pbmn_sum_eok(top_members, "program_net_tr_pbmn"),
         "top_members_avg_return_pct": round(top_avg_return * 100.0, 2) if top_avg_return is not None else None,
         "top_members_positive_ratio": round(top_positive_ratio * 100.0, 1) if top_return_vals else None,
         "top_member_value_share_pct": round(float(top_value_share or 0.0) * 100.0, 1) if top_value_share is not None else None,
@@ -390,6 +932,9 @@ def _build_group_metrics(group: dict[str, Any], members: list[dict[str, Any]], t
         "live_signal_coverage_ratio": round((sum(1 for m in members if float(m.get("live_signal_score", 0.0)) > 0.0) / len(members) * 100.0), 1)
         if members
         else 0.0,
+        "up_ratio": round(float(up_ratio), 3),
+        "rs60_ratio": round(float(rs60_ratio), 3),
+        "rs70_ratio": round(float(rs70_ratio), 3),
         "avg_per": round(avg_per, 2) if avg_per is not None else None,
     }
 
@@ -494,10 +1039,18 @@ def _build_rows(
     live_signal_map: dict[str, dict[str, Any]],
     *,
     top_n: int,
+    investor_by_symbol: dict[str, dict[str, Any]] | None = None,
+    program_by_symbol: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     rows = []
     for group in groups:
-        all_members = _score_group_members(group["stocks"], quotes_by_symbol, live_signal_map)
+        all_members = _score_group_members(
+            group["stocks"],
+            quotes_by_symbol,
+            live_signal_map,
+            investor_by_symbol=investor_by_symbol,
+            program_by_symbol=program_by_symbol,
+        )
         members = all_members[:top_n]
         analysis = _build_group_metrics(group, all_members, members)
         n_peer = len(all_members)
@@ -562,6 +1115,37 @@ def _render_leaderboard_md(
     return lines
 
 
+def _render_leaderboard_md_v2(
+    rows: list[dict[str, Any]],
+    *,
+    title: str,
+    top_n: int = 5,
+    top_k: int = 10,
+    footnote: str = "",
+) -> list[str]:
+    lines = [f"## {title}", ""]
+    if footnote:
+        lines.append(f"> {footnote}")
+        lines.append("")
+    tpn_label = f"Top{int(top_n)} 평균"
+    lines.extend(
+        [
+            f"| 순위 | 섹터 | ThemeScoreV2 | 기존RS | 지속성 | 확산도 | 품질 | {tpn_label} | 종목수 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |",
+        ]
+    )
+    for idx, row in enumerate(rows[:top_k], start=1):
+        a = dict(row.get("analysis") or {})
+        tma = a.get("top_members_avg_return_pct")
+        tpn = _fmt_pct(_safe_float(tma, 0.0) / 100.0) if tma is not None else "-"
+        lines.append(
+            f"| {idx} | {row.get('display_path', '-')} | {a.get('theme_score_v2', '-')} | {a.get('relative_strength_score', '-')} | "
+            f"{a.get('persistence_score', '-')} | {a.get('breadth_score', '-')} | {a.get('theme_quality_label', '-')} | {tpn} | {a.get('member_count', '-')} |"
+        )
+    lines.append("")
+    return lines
+
+
 def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[str]:
     lines = [f"## {title}", ""]
     if "중분류" in title:
@@ -586,6 +1170,33 @@ def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[
             f"|  상태: **{a.get('leader_status', '-')}**  |  종목수: **{a.get('member_count', '-')}**"
         )
         lines.append("")
+        # v2 quality metrics
+        ql = str(a.get("theme_quality_label") or "").strip()
+        if ql:
+            lines.append(
+                "- 테마 품질: **{}**  |  ThemeScoreV2: `{}`  |  지속성: `{}`  |  확산도: `{}`".format(
+                    ql,
+                    a.get("theme_score_v2", "-"),
+                    a.get("persistence_score", "-") if a.get("persistence_score") is not None else "데이터부족",
+                    a.get("breadth_score", "-") if a.get("breadth_score") is not None else "데이터부족",
+                )
+            )
+            lines.append(
+                "- Persistence: 5일 Top3 `{}` / 10일 Top5 `{}` / 5일 RS평균 `{}` / 5일 기울기 `{}` / 대금(5/20) `{}`".format(
+                    f"{a.get('rank_top3_days_5d', 0)}일",
+                    f"{a.get('rank_top5_days_10d', 0)}일",
+                    a.get("rs_avg_5d", "-"),
+                    a.get("rs_slope_5d", "-"),
+                    (f"{a.get('value_ratio_5d_20d')}배" if a.get("value_ratio_5d_20d") is not None else "데이터부족"),
+                )
+            )
+            lines.append(
+                "- Breadth: RS60+ `{}` / 상대상승 `{}` / 대금확산 `{}`".format(
+                    _fmt_pct(_safe_float(a.get("rs60_ratio"), 0.0)),
+                    (f"{float(a.get('relative_up_ratio'))*100.0:+.1f}%p" if a.get("relative_up_ratio") is not None else "데이터부족"),
+                    (f"{_fmt_pct(_safe_float(a.get('value_expansion_ratio'), 0.0))}" if a.get("value_expansion_ratio") is not None else "데이터부족"),
+                )
+            )
         lines.append(
             f"- 실시간 RS 지표: 시총가중 RS `{a.get('weighted_rs', '-')}` / 평균 RS `{a.get('avg_rs', '-')}` / "
             f"RS80+ 비중 `{_fmt_pct(_safe_float(a.get('high_rs_ratio'), 0.0) / 100.0)}` / "
@@ -599,6 +1210,17 @@ def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[
             f"대표종목 당일 평균 `{_fmt_pct(_safe_float(a.get('top_members_avg_return_pct'), 0.0) / 100.0) if a.get('top_members_avg_return_pct') is not None else '-'}` / "
             f"상승비중 `{_fmt_pct(_safe_float(a.get('top_members_positive_ratio'), 0.0) / 100.0) if a.get('top_members_positive_ratio') is not None else '-'}`"
         )
+        tfe = a.get("top_members_foreign_net_eok_sum")
+        tie = a.get("top_members_institution_net_eok_sum")
+        tpe = a.get("top_members_program_net_eok_sum")
+        if any(x is not None for x in (tfe, tie, tpe)):
+            lines.append(
+                "- 수급(대표 종목 순매수 합, 순매수거래대금 억 원): 외국인 `{}` · 기관 `{}` · 프로그램 `{}`".format(
+                    f"{float(tfe):+,.1f}" if tfe is not None else "-",
+                    f"{float(tie):+,.1f}" if tie is not None else "-",
+                    f"{float(tpe):+,.1f}" if tpe is not None else "-",
+                )
+            )
         lines.append(
             f"- 신호 커버리지: 라이브 랭킹 `{_fmt_pct(_safe_float(a.get('live_signal_coverage_ratio'), 0.0) / 100.0)}` / "
             f"현재가 보강 `{_fmt_pct(_safe_float(a.get('quote_coverage_ratio'), 0.0) / 100.0)}`"
@@ -619,18 +1241,23 @@ def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[
             lines.append(
                 f"- 구성 {a.get('peer_member_count')}-종(소표본): RS·대표가 요동일 수 있음. 동일 티커가 **서로 다른 중분류**에 있으면 점수는 **각 그룹에서 따로** 계산됨"
             )
+        if int(a.get("member_count") or 0) < 10:
+            lines.append("> 표본 종목 수가 적어 확산도 점수 변동성이 클 수 있음.")
         if a.get("avg_per") is not None:
             lines.append(f"- PER 평균(단순): `{a.get('avg_per')}`")
         signals = list(a.get("leader_signals") or [])
         if signals:
             lines.append(f"- 주도 신호: {', '.join(signals)}")
         lines.append("")
-        lines.append("| 대표 종목 | 코드 | RS | 시총(억) | 당일등락률 | 현재가 | 거래대금(억) |")
-        lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
+        lines.append(
+            "| 대표 종목 | 코드 | RS | 시총(억) | 당일등락률 | 현재가 | 거래대금(억) | 외국인 순매수(억) | 기관 순매수(억) | 프로그램 순매수(억) |"
+        )
+        lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
         for m in row.get("major_stocks") or []:
             lines.append(
                 f"| {m.get('name', '-')} | `{m.get('symbol', '-')}` | {m.get('rs', '-')} | "
-                f"{_fmt_num(m.get('market_cap_eok'))} | {_fmt_pct(m.get('return_pct'))} | {_fmt_num(m.get('price'))} | {_fmt_eok(m.get('value_traded'))} |"
+                f"{_fmt_num(m.get('market_cap_eok'))} | {_fmt_pct(m.get('return_pct'))} | {_fmt_num(m.get('price'))} | {_fmt_eok(m.get('value_traded'))} | "
+                f"{_fmt_signed_eok(m.get('foreign_net_tr_pbmn'))} | {_fmt_signed_eok(m.get('institution_net_tr_pbmn'))} | {_fmt_signed_eok(m.get('program_net_tr_pbmn'))} |"
             )
         lines.append("")
     return lines
@@ -651,7 +1278,13 @@ def _render_thema_summary_md(
         f"> 분류 원본: {source_path}",
         f"> 생성 시각: {_fmt_ts(collected_at)}",
         f"> 대분류 수: {meta.get('major_category_count', '-')} / 중분류 수: {meta.get('middle_category_count', '-')}",
-        f"> 종목 수: {meta.get('unique_stock_count', '-')} / 시세 보강 종목 수: {meta.get('quote_symbol_count', '-')}",
+        f"> 종목 수: {meta.get('unique_stock_count', '-')} / 시세 보강 종목 수: {meta.get('quote_symbol_count', '-')}"
+        f" / 외국인·기관 순위 집계 심볼: {meta.get('foreign_institution_rank_symbol_count', '-')} / 프로그램(종목별) 심볼: {meta.get('program_trade_symbol_count', '-')}"
+        + (
+            f" / 시세·프로그램 API 대상: {meta.get('quote_enrichment_api_target_count', '-')}종 (`{meta.get('quote_enrichment_mode', '-')}`)"
+            if meta.get("quote_enrichment_mode") is not None
+            else ""
+        ),
         "",
         "<details open>",
         "<summary>대분류 Leaderboard</summary>",
@@ -665,6 +1298,14 @@ def _render_thema_summary_md(
             footnote="그룹 점수(표 RS)는 **다른 대분류와만** 비교. 종목 RS·백분위·대표는 **해당 대분류 구성(하위 전체, 종목 중복 제거) 안에서만** 상대 비교.",
         )
     )
+    lines.extend(
+        _render_leaderboard_md_v2(
+            major_rows,
+            title="대분류 Leaderboard (ThemeScoreV2)",
+            top_n=top_n,
+            footnote="ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%). (데이터 부족 시 품질/점수는 '데이터부족')",
+        )
+    )
     lines.extend(["</details>", "", "<details>", "<summary>중분류 Leaderboard</summary>", ""])
     lines.extend(
         _render_leaderboard_md(
@@ -673,6 +1314,14 @@ def _render_thema_summary_md(
             top_n=top_n,
             footnote="그룹 점수는 **다른 중분류와만** 비교(대분류 랭킹과 별개). "
             "종목 RS·백분위·대표는 **그 중분류(single `middleCategory`)에만 싣은 구성** 안에서만 상대 비교. 표본(종목 수)이 적으면 지표가 요동칠 수 있음.",
+        )
+    )
+    lines.extend(
+        _render_leaderboard_md_v2(
+            middle_rows,
+            title="중분류 Leaderboard (ThemeScoreV2)",
+            top_n=top_n,
+            footnote="ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%). (데이터 부족 시 품질/점수는 '데이터부족')",
         )
     )
     lines.extend(["</details>", "", "<details open>", "<summary>대분류 섹터 카드</summary>", ""])
@@ -725,6 +1374,53 @@ def _render_leaderboard_html(
             f"<td>{_escape_html(a.get('leader_status', '-'))}</td>"
             f"<td>{a.get('member_count', '-')}</td>"
             f"<td>{_fmt_num(a.get('market_cap_total_eok'))}</td>"
+            "</tr>"
+        )
+    parts.append("</tbody></table>")
+    if footnote:
+        parts.append(f"<p class=\"lb-footnote\">{_escape_html(footnote)}</p>")
+    parts.append("</div></details>")
+    return "".join(parts)
+
+
+def _render_leaderboard_html_v2(
+    rows: list[dict[str, Any]],
+    *,
+    title: str,
+    top_n: int,
+    open_by_default: bool,
+    footnote: str = "",
+) -> str:
+    open_attr = " open" if open_by_default else ""
+    tpn_h = f"Top{int(top_n)} 평균"
+    parts = [f"<details class=\"section fold\"{open_attr}><summary class=\"section-title\">{_escape_html(title)}</summary><div class=\"leaderboard\">"]
+    parts.append(
+        "<table class=\"leaderboard-table\"><thead><tr>"
+        "<th>순위</th><th>섹터</th><th>ThemeScoreV2</th><th>기존RS</th><th>지속성</th><th>확산도</th><th>테마품질</th>"
+        f"<th>{_escape_html(tpn_h)}</th><th>종목수</th>"
+        "</tr></thead><tbody>"
+    )
+    for idx, row in enumerate(rows[:10], start=1):
+        a = dict(row.get("analysis") or {})
+        tma = a.get("top_members_avg_return_pct")
+        if tma is not None:
+            tpn_html = _signed_value_html(
+                _fmt_pct(_safe_float(tma, 0.0) / 100.0),
+                _safe_float(tma, 0.0) / 100.0,
+            )
+        else:
+            tpn_html = "-"
+        parts.append(
+            "<tr>"
+            f"<td>{idx}</td>"
+            f"<td>{_escape_html(row.get('display_path', '-'))}</td>"
+            f"<td>{_escape_html(str(a.get('theme_score_v2', '-') if a.get('theme_score_v2') is not None else '데이터부족'))}</td>"
+            f"<td>{_escape_html(str(a.get('relative_strength_score', '-')))}</td>"
+            f"<td>{_escape_html(str(a.get('persistence_score', '-') if a.get('persistence_score') is not None else '데이터부족'))}</td>"
+            f"<td>{_escape_html(str(a.get('breadth_score', '-') if a.get('breadth_score') is not None else '데이터부족'))}</td>"
+            f"<td>{_escape_html(str(a.get('theme_quality_label', '-') or '-'))}</td>"
+            f"<td>{tpn_html}</td>"
+            f"<td>{_escape_html(str(a.get('member_count', '-')))}</td>"
             "</tr>"
         )
     parts.append("</tbody></table>")
@@ -790,10 +1486,18 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
             )
         parts.append("<div class=\"metrics\">")
         metric_pairs = [
+            ("테마 품질", a.get("theme_quality_label") or "-", None),
+            ("ThemeScoreV2", a.get("theme_score_v2") if a.get("theme_score_v2") is not None else "데이터부족", None),
+            ("지속성", a.get("persistence_score") if a.get("persistence_score") is not None else "데이터부족", None),
+            ("확산도", a.get("breadth_score") if a.get("breadth_score") is not None else "데이터부족", None),
+            ("5일 Top3", f"{int(a.get('rank_top3_days_5d') or 0)}일" if a.get("persistence_score") is not None else "데이터부족", None),
             ("시총가중 RS", a.get("weighted_rs"), None),
             ("평균 RS", a.get("avg_rs"), None),
             ("RS80+ 비중", _fmt_pct(_safe_float(a.get("high_rs_ratio"), 0.0) / 100.0), None),
             ("RS60+ 비중", _fmt_pct(_safe_float(a.get("strong_rs_ratio"), 0.0) / 100.0), None),
+            ("RS60+ 비중(정의)", _fmt_pct(_safe_float(a.get("rs60_ratio"), 0.0)), None),
+            ("상대 상승비율", f"{float(_safe_float(a.get('relative_up_ratio'), 0.0))*100.0:+.1f}%p" if a.get("relative_up_ratio") is not None else "데이터부족", None),
+            ("거래대금 확산비율", _fmt_pct(_safe_float(a.get("value_expansion_ratio"), 0.0)) if a.get("value_expansion_ratio") is not None else "데이터부족", None),
             ("대표등락 코호트%", a.get("rep_top_return_cohort_pct"), None),
             ("대표대금합 코호트%", a.get("rep_top_value_sum_cohort_pct"), None),
             ("라이브커버 코호트%", a.get("live_cover_cohort_pct"), None),
@@ -821,6 +1525,9 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
                 else "-",
                 None,
             ),
+            ("대표 외국인 순매수 합", f"{float(a['top_members_foreign_net_eok_sum']):+,.1f}" if a.get("top_members_foreign_net_eok_sum") is not None else "-", a.get("top_members_foreign_net_eok_sum")),
+            ("대표 기관 순매수 합", f"{float(a['top_members_institution_net_eok_sum']):+,.1f}" if a.get("top_members_institution_net_eok_sum") is not None else "-", a.get("top_members_institution_net_eok_sum")),
+            ("대표 프로그램 순매수 합", f"{float(a['top_members_program_net_eok_sum']):+,.1f}" if a.get("top_members_program_net_eok_sum") is not None else "-", a.get("top_members_program_net_eok_sum")),
         ]
         for label, value, sign_value in metric_pairs:
             value_html = _signed_value_html(str(value), sign_value) if sign_value is not None and value != "-" else _escape_html(value)
@@ -833,9 +1540,16 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
                 parts.append(f"<span class=\"signal\">{_escape_html(signal)}</span>")
             parts.append("</div>")
         parts.append("<table>")
-        parts.append("<thead><tr><th>종목</th><th>코드</th><th>RS</th><th>시총(억)</th><th>당일등락률</th><th>현재가</th><th>거래대금(억)</th></tr></thead><tbody>")
+        parts.append(
+            "<thead><tr><th>종목</th><th>코드</th><th>RS</th><th>시총(억)</th>"
+            "<th>당일등락률</th><th>현재가</th><th>거래대금(억)</th>"
+            "<th>외국인 순매수(억)</th><th>기관 순매수(억)</th><th>프로그램 순매수(억)</th></tr></thead><tbody>"
+        )
         for m in row.get("major_stocks") or []:
             url = _naver_finance_stock_url(str(m.get("symbol", "")))
+            fv = _fmt_signed_eok(m.get("foreign_net_tr_pbmn"))
+            iv = _fmt_signed_eok(m.get("institution_net_tr_pbmn"))
+            pv = _fmt_signed_eok(m.get("program_net_tr_pbmn"))
             parts.append(
                 "<tr>"
                 f"<td><a href=\"{_escape_html(url)}\" target=\"_blank\" rel=\"noopener noreferrer\">{_escape_html(m.get('name', '-'))}</a></td>"
@@ -845,6 +1559,9 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
                 f"<td>{_signed_value_html(_fmt_pct(m.get('return_pct')), m.get('return_pct')) if m.get('return_pct') is not None else '-'}</td>"
                 f"<td>{_signed_value_html(_fmt_num(m.get('price')), m.get('return_pct')) if m.get('price') is not None else '-'}</td>"
                 f"<td>{_fmt_eok(m.get('value_traded'))}</td>"
+                f"<td>{_signed_value_html(fv, m.get('foreign_net_tr_pbmn')) if fv != '-' else '-'}</td>"
+                f"<td>{_signed_value_html(iv, m.get('institution_net_tr_pbmn')) if iv != '-' else '-'}</td>"
+                f"<td>{_signed_value_html(pv, m.get('program_net_tr_pbmn')) if pv != '-' else '-'}</td>"
                 "</tr>"
             )
         parts.append("</tbody></table>")
@@ -896,7 +1613,8 @@ def _render_thema_report_html(
         f"<p>분류 원본: {_escape_html(source_path)}<br>생성 시각: {_escape_html(_fmt_ts(collected_at))}<br>"
         f"대분류 {meta.get('major_category_count', '-')} / 중분류 {meta.get('middle_category_count', '-')} / "
         f"종목 {meta.get('unique_stock_count', '-')} / 라이브 신호 {meta.get('live_signal_symbol_count', '-')} / "
-        f"시세보강 {meta.get('quote_symbol_count', '-')} / 대표종목 {top_n}</p>"
+        f"시세보강 {meta.get('quote_symbol_count', '-')} / 수급(KIS 순위) {meta.get('foreign_institution_rank_symbol_count', '-')} / "
+        f"프로그램 종목별 {meta.get('program_trade_symbol_count', '-')} / 대표종목 {top_n}</p>"
         "<div class=\"hero-stats\">"
         f"<div class=\"hero-stat\"><div class=\"label\">대분류</div><div class=\"value\">{len(major_rows)}</div></div>"
         f"<div class=\"hero-stat\"><div class=\"label\">중분류</div><div class=\"value\">{len(middle_rows)}</div></div>"
@@ -904,7 +1622,9 @@ def _render_thema_report_html(
         f"<div class=\"hero-stat\"><div class=\"label\">분류 스키마</div><div class=\"value\">{_escape_html(meta.get('schema_version', '-'))}</div></div>"
         "</div></section>"
         f"{_render_leaderboard_html(major_rows, title='대분류 Leaderboard', top_n=top_n, open_by_default=True, footnote='그룹 점수는 다른 대분류와만 비교. 종목 RS·백분위·대표는 해당 대분류(하위 전체, 종목 중복 제거) 구성만 기준.')}"
+        f"{_render_leaderboard_html_v2(major_rows, title='대분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%).')}"
         f"{_render_leaderboard_html(middle_rows, title='중분류 Leaderboard', top_n=top_n, open_by_default=False, footnote='그룹 점수는 다른 중분류와만 비교(대분류 랭킹과 별도). 종목 RS·백분위·대표는 그 중분류에만 싣은 구성으로만. 표본이 적은 중분류는 지표가 요동칠 수 있음.')}"
+        f"{_render_leaderboard_html_v2(middle_rows, title='중분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%).')}"
         f"{_render_group_cards_html(major_rows, title='대분류 섹터 카드', open_by_default=True)}"
         f"{_render_group_cards_html(middle_rows, title='중분류 섹터 카드', open_by_default=False)}"
         "</div></body></html>"
@@ -937,17 +1657,23 @@ def main() -> None:
         help="Thema classification JSON path.",
     )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Output directory.")
+    parser.add_argument("--theme-history-dir", type=Path, default=DEFAULT_THEME_HISTORY_DIR, help="Theme snapshot history directory.")
     parser.add_argument("--top-n", type=int, default=5, help="Top stocks per group.")
     parser.add_argument(
-        "--quote-enrichment",
+        "--no-quote-enrichment",
         action="store_true",
-        help="KIS 현재가/거래대금 보강 사용. 기본은 분류 JSON만으로 빠르게 생성.",
+        help="KIS 현재가/거래대금/종목 프로그램 조회 생략(라이브 랭킹·외국인·기관 순위 가능 범위만 빠르게).",
     )
     parser.add_argument(
-        "--no-quote-enrichment",
-        dest="quote_enrichment",
-        action="store_false",
-        help=argparse.SUPPRESS,
+        "--full-quote-enrichment",
+        action="store_true",
+        help="모든 구성주(+라이브 랭킹에 나온 심볼)에 시세·프로그램 보강. 기본은 섹터별 프로브 RS 상위 top-n만 보강.",
+    )
+    parser.add_argument(
+        "--enrichment-workers",
+        type=int,
+        default=4,
+        help="보강(시세·프로그램·필요 시 종목별 수급) 병렬 워커 수. 기본 4. 과도한 값은 KIS 제한에 걸릴 수 있음.",
     )
     parser.add_argument("--telegram", action="store_true", help="Send summary + html report to Telegram.")
     parser.add_argument(
@@ -965,8 +1691,11 @@ def main() -> None:
         default=os.getenv("TELEGRAM_MESSAGE_THREAD_ID", ""),
         help="Optional Telegram message thread id.",
     )
-    parser.set_defaults(quote_enrichment=False)
     args = parser.parse_args()
+    if bool(args.no_quote_enrichment) and bool(args.full_quote_enrichment):
+        raise SystemExit("--no-quote-enrichment 와 --full-quote-enrichment 는 함께 쓸 수 없습니다.")
+    quote_enrichment = not bool(args.no_quote_enrichment)
+    quote_enrichment_mode = "all" if bool(args.full_quote_enrichment) else "top_by_group"
 
     source_path = _resolve_classification_json(Path(args.classification_json))
     if not source_path.is_file():
@@ -981,14 +1710,112 @@ def main() -> None:
     major_blueprints, middle_blueprints = _build_group_blueprints(data)
     client = build_kis_client_for_mode(args.mode)
     client.authenticate()
+    t_live = time.perf_counter()
     live_signal_map = _build_live_signal_map(client)
-    quote_symbols = _select_quote_symbols(major_blueprints + middle_blueprints, live_signal_map, top_n=max(1, int(args.top_n)))
-    quotes_by_symbol: dict[str, dict[str, Any]] = {}
-    if args.quote_enrichment:
-        quotes_by_symbol = _fetch_quotes(client, quote_symbols)
+    print(f"[timing] live_signal_map  {time.perf_counter() - t_live:.2f}s")
 
-    major_rows = _build_rows(major_blueprints, quotes_by_symbol, live_signal_map, top_n=max(1, int(args.top_n)))
-    middle_rows = _build_rows(middle_blueprints, quotes_by_symbol, live_signal_map, top_n=max(1, int(args.top_n)))
+    investor_by_symbol: dict[str, dict[str, Any]] = {}
+    t_fi = time.perf_counter()
+    try:
+        fi_rows = client.fetch_foreign_institution_flow()
+        investor_by_symbol = _build_investor_by_symbol(fi_rows)
+        if len(fi_rows) == 0:
+            print(
+                "WARNING: fetch_foreign_institution_flow returned empty rows "
+                "(check KIS mode/장 운영/자격증명; 순위 무응답 시 수급 열은 비게 됩니다).",
+                file=sys.stderr,
+            )
+    except Exception as exc:
+        print(f"WARNING: fetch_foreign_institution_flow: {exc}", file=sys.stderr)
+    print(f"[timing] foreign_institution_flow  {time.perf_counter() - t_fi:.2f}s")
+
+    all_groups = major_blueprints + middle_blueprints
+    ew = max(1, int(args.enrichment_workers))
+    probe_quotes: dict[str, dict[str, Any]] = {}
+    probe_minimal_target_n = 0
+    if quote_enrichment and quote_enrichment_mode == "top_by_group":
+        probe_syms = _all_unique_stock_symbols_from_groups(all_groups)
+        probe_minimal_target_n = len(probe_syms)
+        print(
+            f"[probe] 1차 최소 시세(현재가·등락·거래대금, 프로그램 제외) — "
+            f"{probe_minimal_target_n}종  workers={ew}"
+        )
+        t_pq = time.perf_counter()
+        try:
+            probe_quotes, _, _ = _fetch_quote_enrichment_concurrent(
+                client,
+                probe_syms,
+                fetch_investor_per_symbol=False,
+                max_workers=ew,
+                fetch_program=False,
+                log_label="[probe-quote]",
+            )
+        except Exception as exc:
+            print(f"WARNING: probe minimal quotes: {exc}", file=sys.stderr)
+            probe_quotes = {}
+        print(
+            f"[timing] probe_minimal_quotes  {time.perf_counter() - t_pq:.2f}s  "
+            f"ok={len(probe_quotes)}/{probe_minimal_target_n}"
+        )
+
+    quote_symbols = _select_quote_symbols(
+        all_groups,
+        live_signal_map,
+        top_n=max(1, int(args.top_n)),
+        enrichment_mode=quote_enrichment_mode,
+        investor_by_symbol=investor_by_symbol,
+        program_by_symbol={},
+        probe_quotes=probe_quotes if probe_quotes else None,
+    )
+    print(f"[enrichment] mode={quote_enrichment_mode}  quote_api_targets={len(quote_symbols)}")
+
+    quotes_by_symbol: dict[str, dict[str, Any]] = dict(probe_quotes)
+    program_by_symbol: dict[str, dict[str, Any]] = {}
+    if quote_enrichment:
+        have_rank_investor = bool(investor_by_symbol)
+        t_en = time.perf_counter()
+        try:
+            q2, investor_extra, program_by_symbol = _fetch_quote_enrichment_concurrent(
+                client,
+                quote_symbols,
+                fetch_investor_per_symbol=not have_rank_investor,
+                max_workers=ew,
+                fetch_program=True,
+            )
+            quotes_by_symbol.update(q2)
+            if not have_rank_investor:
+                investor_by_symbol = investor_extra
+                if not investor_by_symbol:
+                    print(
+                        "WARNING: investor-by-symbol fallback also returned empty rows "
+                        "(account permission / API availability issue likely).",
+                        file=sys.stderr,
+                    )
+        except Exception as exc:
+            print(f"WARNING: quote enrichment: {exc}", file=sys.stderr)
+        print(f"[timing] quote_enrichment (incl. per-symbol API)  {time.perf_counter() - t_en:.2f}s")
+
+    t_rows = time.perf_counter()
+    major_rows = _build_rows(
+        major_blueprints,
+        quotes_by_symbol,
+        live_signal_map,
+        top_n=max(1, int(args.top_n)),
+        investor_by_symbol=investor_by_symbol,
+        program_by_symbol=program_by_symbol,
+    )
+    middle_rows = _build_rows(
+        middle_blueprints,
+        quotes_by_symbol,
+        live_signal_map,
+        top_n=max(1, int(args.top_n)),
+        investor_by_symbol=investor_by_symbol,
+        program_by_symbol=program_by_symbol,
+    )
+    print(f"[timing] build_rows  {time.perf_counter() - t_rows:.2f}s")
+
+    # --- Persistence/Breadth: load history + compute v2 metrics ---
+    # Determine "today" date for snapshot key.
     collected_at = max(
         [
             str(m.get("analysis", {}).get("collected_at", ""))
@@ -1001,6 +1828,167 @@ def main() -> None:
         from scripts.collect_sector_data import _now_kst_iso
 
         collected_at = _now_kst_iso()
+    today_yyyy_mm_dd = _parse_iso_date(collected_at) or str(_dt.date.today().isoformat())
+
+    history_dir = Path(args.theme_history_dir)
+    history_rows = _load_theme_history_rows(history_dir, max_days=40)
+
+    # market_up_ratio: classification 전체(고유 심볼) 중 당일 상승 비율
+    all_unique_syms = _all_unique_stock_symbols_from_groups(major_blueprints + middle_blueprints)
+    market_returns: list[float] = []
+    for s in all_unique_syms:
+        q = quotes_by_symbol.get(_norm_kis_stock_symbol(s)) or {}
+        if q.get("return_pct") is None:
+            continue
+        try:
+            market_returns.append(float(q.get("return_pct") or 0.0))
+        except Exception:
+            continue
+    market_up_ratio = (
+        (sum(1 for r in market_returns if r > 0.0) / len(market_returns)) if market_returns else None
+    )
+
+    # per-symbol value expansion stats from silver snapshot (avg5/avg20)
+    value_avgs = _load_symbol_value_averages(all_unique_syms, lookback_days=30)
+
+    def _inject_v2(rows: list[dict[str, Any]], *, cohort_history: list[dict[str, Any]]) -> None:
+        for row in rows:
+            a = dict(row.get("analysis") or {})
+            major = str(row.get("major_category") or "")
+            middle = row.get("middle_category")
+            key = (major, middle)
+
+            # current snapshot row for persistence inputs
+            cur_snap = {
+                "date": today_yyyy_mm_dd,
+                "group_type": str(row.get("group_type") or ""),
+                "major_category": major,
+                "middle_category": middle,
+                "theme_rs": float(a.get("relative_strength_score") or 0.0),
+                "theme_rank": int(a.get("relative_strength_rank") or 0),
+                "member_count": int(a.get("member_count") or 0),
+                "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
+                "total_value_traded": float(a.get("total_value_traded") or 0.0),
+                "up_ratio": float(a.get("up_ratio") or 0.0),
+                "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
+                "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
+                "leader_status": str(a.get("leader_status") or ""),
+            }
+
+            pers = calculate_persistence_score(cur_snap, cohort_history, key)
+            breadth_inputs_member_count = int(a.get("member_count") or 0)
+
+            # value_expansion_ratio: 구성 종목 중 (avg5/avg20 >= 1.5) 비중
+            expanded_cnt = 0
+            denom = 0
+            for m in (row.get("major_stocks") or []):
+                # NOTE: major_stocks 는 top_n slice 이라 breadth member set으로는 부족.
+                # expansion 은 "구성 종목 전체"가 원칙인데, 현재 row에는 전체 members가 없어서
+                # 여기서는 최소한 분석 스냅샷(분류 전체) 기반의 평균으로 계산하지 않고,
+                # member_count 기준의 대표종목(표시대상) 프록시로 둔다.
+                pass
+            # 프록시 대신: rs60_ratio/up_ratio 를 all_members 기준으로 이미 계산했으므로,
+            # expansion 도 동일하게 all_members 가 필요. 현 구조에서는 members 리스트를 보존하지 않기 때문에,
+            # value_expansion_ratio 는 major_stocks(대표) 기반으로 근사한다.
+            for m in (row.get("major_stocks") or []):
+                sym = _norm_kis_stock_symbol(m.get("symbol", ""))
+                if not sym:
+                    continue
+                av = value_avgs.get(sym)
+                if not av:
+                    continue
+                avg20 = float(av.get("avg20") or 0.0)
+                avg5 = float(av.get("avg5") or 0.0)
+                if avg20 <= 0:
+                    continue
+                denom += 1
+                if (avg5 / avg20) >= 1.5:
+                    expanded_cnt += 1
+            value_expansion_ratio = (expanded_cnt / denom) if denom > 0 else None
+
+            br = calculate_breadth_score(
+                member_count=breadth_inputs_member_count,
+                rs60_ratio=_safe_float(a.get("rs60_ratio"), 0.0),
+                rs70_ratio=_safe_float(a.get("rs70_ratio"), 0.0),
+                up_ratio=_safe_float(a.get("up_ratio"), 0.0),
+                market_up_ratio=market_up_ratio,
+                value_expansion_ratio=value_expansion_ratio,
+            )
+
+            # merge analysis fields (always present)
+            a.update(
+                {
+                    "persistence_score": pers.get("persistence_score"),
+                    "breadth_score": br.get("breadth_score"),
+                    "rank_top3_days_5d": pers.get("rank_top3_days_5d", 0),
+                    "rank_top5_days_10d": pers.get("rank_top5_days_10d", 0),
+                    "rs_avg_5d": pers.get("rs_avg_5d"),
+                    "rs_avg_10d": pers.get("rs_avg_10d"),
+                    "rs_slope_5d": pers.get("rs_slope_5d"),
+                    "value_ratio_5d_20d": pers.get("value_ratio_5d_20d"),
+                    "rs60_ratio": br.get("rs60_ratio", a.get("rs60_ratio", 0.0)),
+                    "rs70_ratio": br.get("rs70_ratio", a.get("rs70_ratio", 0.0)),
+                    "up_ratio": br.get("up_ratio", a.get("up_ratio", 0.0)),
+                    "relative_up_ratio": br.get("relative_up_ratio"),
+                    "value_expansion_ratio": br.get("value_expansion_ratio"),
+                }
+            )
+
+            theme_quality = classify_theme_quality(a.get("persistence_score"), a.get("breadth_score"))
+            a["theme_quality_label"] = theme_quality
+
+            if a.get("persistence_score") is None or a.get("breadth_score") is None:
+                a["theme_score_v2"] = None
+            else:
+                a["theme_score_v2"] = round(
+                    0.60 * float(a.get("relative_strength_score") or 0.0)
+                    + 0.20 * float(a.get("persistence_score") or 0.0)
+                    + 0.20 * float(a.get("breadth_score") or 0.0),
+                    1,
+                )
+
+            row["analysis"] = a
+
+        # Sort by v2 when present, fallback to RS
+        rows.sort(
+            key=lambda r: (
+                -float(dict(r.get("analysis") or {}).get("theme_score_v2") or -1.0),
+                -float(dict(r.get("analysis") or {}).get("relative_strength_score") or 0.0),
+                str(r.get("display_path", "")),
+            )
+        )
+
+    major_hist = [r for r in history_rows if str(r.get("group_type") or "") == "major"]
+    middle_hist = [r for r in history_rows if str(r.get("group_type") or "") == "middle"]
+    _inject_v2(major_rows, cohort_history=major_hist)
+    _inject_v2(middle_rows, cohort_history=middle_hist)
+
+    # --- Write history snapshot for future runs ---
+    snapshot_rows: list[dict[str, Any]] = []
+    for row in major_rows + middle_rows:
+        a = dict(row.get("analysis") or {})
+        snapshot_rows.append(
+            {
+                "date": today_yyyy_mm_dd,
+                "group_type": str(row.get("group_type") or ""),
+                "major_category": row.get("major_category"),
+                "middle_category": row.get("middle_category"),
+                "theme_rs": float(a.get("relative_strength_score") or 0.0),
+                "theme_rank": int(a.get("relative_strength_rank") or 0),
+                "member_count": int(a.get("member_count") or 0),
+                "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
+                "total_value_traded": float(a.get("total_value_traded") or 0.0),
+                "up_ratio": float(a.get("up_ratio") or 0.0),
+                "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
+                "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
+                "leader_status": str(a.get("leader_status") or ""),
+            }
+        )
+    try:
+        snap_path = _write_theme_history_snapshot(history_dir, date_yyyy_mm_dd=today_yyyy_mm_dd, rows=snapshot_rows)
+        print(f"Wrote theme history snapshot {snap_path}")
+    except Exception as exc:
+        print(f"WARNING: write theme history snapshot failed: {exc}", file=sys.stderr)
     meta = {
         "schema_version": data.get("schema_version"),
         "major_category_count": data.get("major_category_count"),
@@ -1008,9 +1996,18 @@ def main() -> None:
         "unique_stock_count": data.get("unique_stock_count"),
         "live_signal_symbol_count": len(live_signal_map),
         "quote_symbol_count": len(quotes_by_symbol),
+        "foreign_institution_rank_symbol_count": len(investor_by_symbol),
+        "program_trade_symbol_count": len(program_by_symbol),
+        "quote_enrichment_mode": quote_enrichment_mode,
+        "quote_enrichment_api_target_count": len(quote_symbols),
+        "probe_minimal_quote_target_count": probe_minimal_target_n,
+        "probe_minimal_quote_fetched_count": len(probe_quotes),
         "source_file": data.get("source_file"),
         "description": data.get("description"),
         "collected_at": collected_at,
+        "theme_history_dir": str(history_dir),
+        "theme_snapshot_date": today_yyyy_mm_dd,
+        "market_up_ratio": _round1((market_up_ratio or 0.0) * 100.0) if market_up_ratio is not None else None,
     }
 
     payload = {

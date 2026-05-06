@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -35,6 +36,23 @@ def _pick(u: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _pick_by_key_fragments(u: dict[str, Any], includes: tuple[str, ...], excludes: tuple[str, ...] = ()) -> Any:
+    """
+    키명이 문서/계정에 따라 바뀌는 응답에서, 키 fragment 기반으로 값을 찾는다.
+    """
+    inc = tuple(str(x).upper() for x in includes)
+    exc = tuple(str(x).upper() for x in excludes)
+    for k, v in u.items():
+        ku = str(k).upper()
+        if any(e in ku for e in exc):
+            continue
+        if all(i in ku for i in inc):
+            s = str(v).strip()
+            if s not in {"", "-", "None"}:
+                return v
+    return None
+
+
 def _to_float(x: Any, default: float = 0.0) -> float:
     if x is None:
         return default
@@ -45,6 +63,20 @@ def _to_float(x: Any, default: float = 0.0) -> float:
         return float(s)
     except (TypeError, ValueError):
         return default
+
+
+def _maybe_scale_tr_pbmn_to_won(v: float | None) -> float | None:
+    """
+    KIS 응답의 *_TR_PBMN 은 API별로 단위가 섞여 들어오는 경우가 있어,
+    너무 작은 값(천원 단위로 보이는 값)을 원 단위로 보정한다.
+    """
+    if v is None:
+        return None
+    x = float(v)
+    # ex) 삼성전자 외국인 순매수 거래대금이 -683254 로 오면 (천원 단위) → -683,254,000원
+    if 1e4 <= abs(x) < 1e9:
+        return x * 1000.0
+    return x
 
 
 def _coerce_output_list(payload: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
@@ -223,16 +255,17 @@ class KISClient:
         self._min_interval_sec = float(min_interval_sec)
         self._last_call_ts: float = 0.0
         self._token: str | None = None
-
-    def _throttle(self) -> None:
-        now = time.monotonic()
-        gap = now - self._last_call_ts
-        if gap < self._min_interval_sec:
-            time.sleep(self._min_interval_sec - gap)
-        self._last_call_ts = time.monotonic()
+        self._throttle_lock = threading.Lock()
 
     def _get(self, path: str, params: dict[str, Any], tr_id: str) -> dict[str, Any]:
-        self._throttle()
+        # 호출 시작 시점만 min_interval 로 간격을 둔다. HTTP 대기는 락 밖에서 진행되어
+        # 다중 스레드일 때 RTT 가 겹치며 전체 시간이 단축된다.
+        with self._throttle_lock:
+            now = time.monotonic()
+            gap = now - self._last_call_ts
+            if gap < self._min_interval_sec:
+                time.sleep(self._min_interval_sec - gap)
+            self._last_call_ts = time.monotonic()
         return self._kis.request_get(path, params, tr_id)
 
     def authenticate(self) -> None:
@@ -400,13 +433,14 @@ class KISClient:
 
     def fetch_ranking_return(self) -> list[dict[str, Any]]:
         try:
-            # KIS fluctuation(v1_국내주식-088): FID_* 대문자 권장, TRGT 9자리·EXLS 10자리(미만이면 OPSQ2002 등).
+            # 국내주식 등락률 순위: FID_RANK_SORT_CLS_CODE 는 1자리 코드 사용.
             params = {
+                "FID_RSFL_RATE1": "-30",
                 "FID_RSFL_RATE2": "30",
                 "FID_COND_MRKT_DIV_CODE": "J",
                 "FID_COND_SCR_DIV_CODE": "20170",
                 "FID_INPUT_ISCD": "0000",
-                "FID_RANK_SORT_CLS_CODE": "0000",
+                "FID_RANK_SORT_CLS_CODE": "0",
                 "FID_INPUT_CNT_1": "30",
                 "FID_PRC_CLS_CODE": "0",
                 "FID_INPUT_PRICE_1": "0",
@@ -415,7 +449,6 @@ class KISClient:
                 "FID_TRGT_CLS_CODE": "111111111",
                 "FID_TRGT_EXLS_CLS_CODE": "0000000000",
                 "FID_DIV_CLS_CODE": "0",
-                "FID_RSFL_RATE1": "-30",
             }
             body = self._get(ep.URL_FLUCTUATION_RANK, params, ep.TR_FLUCTUATION_RANK)
             rows = _coerce_output_list(body, "output", "output1")
@@ -562,7 +595,7 @@ class KISClient:
             body = self._get(
                 ep.URL_FRGN_INST_TOTAL,
                 {
-                    "FID_COND_MRKT_DIV_CODE": "V",
+                    "FID_COND_MRKT_DIV_CODE": self._market_div,
                     "FID_COND_SCR_DIV_CODE": "16449",
                     "FID_INPUT_ISCD": "0000",
                     "FID_DIV_CLS_CODE": "0",
@@ -571,30 +604,191 @@ class KISClient:
                 },
                 ep.TR_FRGN_INST_TOTAL,
             )
-            rows = _coerce_output_list(body, "output", "output1")
+            rows = _coerce_output_list(body, "output", "output1", "output2")
             out: list[dict[str, Any]] = []
             for row in rows:
                 if not isinstance(row, dict):
                     continue
                 u = _upper_map(row)
-                sym = str(_pick(u, "MKSC_SHRN_ISCD", "ISCD", "PDNO") or "").strip()
+                sym_raw = str(_pick(u, "MKSC_SHRN_ISCD", "SHOTN_ISCD", "ISCD", "PDNO", "STCK_SHRN_ISCD") or "").strip()
+                sym = sym_raw.zfill(6) if sym_raw.isdigit() else sym_raw
                 if not sym:
                     continue
                 name = str(_pick(u, "HTS_KOR_ISNM") or "").strip()
-                fn = _to_float(_pick(u, "FRGN_NTBY_QTY", "FRGN_NET", "FRGN_NTBY_TR_PBMN"))
-                ins = _to_float(_pick(u, "ORGNT_NTBY_QTY", "INST_NET", "ORGNT_NTBY_TR_PBMN"))
+                raw_fn_pbmn = _pick(u, "FRGN_NTBY_TR_PBMN", "FRGN_NTBY_SUM_TR_PBMN", "FRGN_SBTR_NTBY_TR_PBMN")
+                raw_ins_pbmn = _pick(
+                    u,
+                    "ORGNT_NTBY_TR_PBMN",
+                    "ORG_NTBY_TR_PBMN",
+                    "ORGNT_SBTR_NTBY_TR_PBMN",
+                    "INST_NTBY_TR_PBMN",
+                    "INSTT_NTBY_TR_PBMN",
+                )
+                fn_pbmn = _to_float(raw_fn_pbmn) if raw_fn_pbmn is not None else None
+                ins_pbmn = _to_float(raw_ins_pbmn) if raw_ins_pbmn is not None else None
+                fn_qty = _to_float(_pick(u, "FRGN_NTBY_QTY"))
+                ins_qty = _to_float(_pick(u, "ORGNT_NTBY_QTY", "ORG_NTBY_QTY", "INSTT_NTBY_QTY"))
+
+                fn_st = (
+                    min(1.0, max(-1.0, float(fn_pbmn or 0.0) / 5e10))
+                    if raw_fn_pbmn is not None
+                    else min(1.0, max(-1.0, fn_qty / 1e6))
+                )
+                ins_st = (
+                    min(1.0, max(-1.0, float(ins_pbmn or 0.0) / 5e10))
+                    if raw_ins_pbmn is not None
+                    else min(1.0, max(-1.0, ins_qty / 1e6))
+                )
                 out.append(
                     {
                         "symbol": sym,
                         "name": name,
-                        "foreign_net_strength": min(1.0, max(-1.0, fn / 1e6)),
-                        "institution_net_strength": min(1.0, max(-1.0, ins / 1e6)),
+                        "foreign_net_tr_pbmn": fn_pbmn,
+                        "institution_net_tr_pbmn": ins_pbmn,
+                        "foreign_net_strength": float(fn_st),
+                        "institution_net_strength": float(ins_st),
                     }
                 )
             return out
         except Exception as e:
-            logger.debug("foreign-institution-total: %s", e)
+            logger.warning("foreign-institution-total: %s", e)
             return []
+
+    def fetch_foreign_institution_for_symbol(self, symbol: str) -> dict[str, Any]:
+        """
+        종목별 외국인/기관 순매수(거래대금 우선, 없으면 수량) 조회.
+
+        순위형 foreign-institution-total 이 계정/장 조건으로 실패할 때의 보강 경로.
+        """
+        sym = str(symbol).strip()
+        sym = sym.zfill(6) if sym.isdigit() else sym
+        if not sym:
+            return {}
+        try:
+            # 1) 기본시세/주식현재가 투자자 (공식 샘플 경로)
+            investor_body = self._get(
+                "/uapi/domestic-stock/v1/quotations/inquire-investor",
+                {
+                    "FID_COND_MRKT_DIV_CODE": self._market_div,
+                    "FID_INPUT_ISCD": sym,
+                },
+                "FHKST01010900",
+            )
+            investor_rows = _coerce_output_list(investor_body, "output", "output1", "output2")
+            if investor_rows:
+                iu = _upper_map(investor_rows[0])
+                fnv = _pick(
+                    iu,
+                    "FRGN_NTBY_TR_PBMN",
+                    "FRGN_NTBY_AMT",
+                    "FRGN_NET_TR_PBMN",
+                ) or _pick_by_key_fragments(iu, ("FRGN", "NTBY", "PBMN"))
+                insv = _pick(
+                    iu,
+                    "ORGNT_NTBY_TR_PBMN",
+                    "INST_NTBY_TR_PBMN",
+                    "ORG_NET_TR_PBMN",
+                ) or _pick_by_key_fragments(iu, ("ORG", "NTBY", "PBMN")) or _pick_by_key_fragments(iu, ("INST", "NTBY", "PBMN"))
+                fn_pbmn = _maybe_scale_tr_pbmn_to_won(_to_float(fnv) if fnv is not None else None)
+                ins_pbmn = _maybe_scale_tr_pbmn_to_won(_to_float(insv) if insv is not None else None)
+                if fn_pbmn is not None or ins_pbmn is not None:
+                    fn_st = min(1.0, max(-1.0, float(fn_pbmn or 0.0) / 5e10))
+                    ins_st = min(1.0, max(-1.0, float(ins_pbmn or 0.0) / 5e10))
+                    return {
+                        "symbol": sym,
+                        "foreign_net_tr_pbmn": fn_pbmn,
+                        "institution_net_tr_pbmn": ins_pbmn,
+                        "foreign_net_strength": float(fn_st),
+                        "institution_net_strength": float(ins_st),
+                    }
+
+            # 2) 실패 시 기존 foreign-institution-total(종목 지정) 경로
+            body = self._get(
+                ep.URL_FRGN_INST_TOTAL,
+                {
+                    "FID_COND_MRKT_DIV_CODE": self._market_div,
+                    "FID_COND_SCR_DIV_CODE": "16449",
+                    "FID_INPUT_ISCD": sym,
+                    "FID_DIV_CLS_CODE": "0",
+                    "FID_RANK_SORT_CLS_CODE": "0",
+                    "FID_ETC_CLS_CODE": "0",
+                    "FID_PW_DATA_INCU_YN": "Y",
+                },
+                ep.TR_FRGN_INST_TOTAL,
+            )
+            rows = _coerce_output_list(body, "output1", "output", "output2")
+            if not rows:
+                return {}
+            u = _upper_map(rows[0])
+            raw_fn_pbmn = _pick(u, "FRGN_NTBY_TR_PBMN", "FRGN_NTBY_SUM_TR_PBMN", "FRGN_SBTR_NTBY_TR_PBMN")
+            raw_ins_pbmn = _pick(
+                u,
+                "ORGNT_NTBY_TR_PBMN",
+                "ORG_NTBY_TR_PBMN",
+                "ORGNT_SBTR_NTBY_TR_PBMN",
+                "INST_NTBY_TR_PBMN",
+                "INSTT_NTBY_TR_PBMN",
+            ) or _pick_by_key_fragments(u, ("ORG", "NTBY", "PBMN")) or _pick_by_key_fragments(u, ("INST", "NTBY", "PBMN"))
+            if raw_fn_pbmn is None:
+                raw_fn_pbmn = _pick_by_key_fragments(u, ("FRGN", "NTBY", "PBMN"))
+            fn_pbmn = _to_float(raw_fn_pbmn) if raw_fn_pbmn is not None else None
+            ins_pbmn = _to_float(raw_ins_pbmn) if raw_ins_pbmn is not None else None
+            fn_pbmn = _maybe_scale_tr_pbmn_to_won(fn_pbmn)
+            ins_pbmn = _maybe_scale_tr_pbmn_to_won(ins_pbmn)
+            fn_qty = _to_float(_pick(u, "FRGN_NTBY_QTY"))
+            ins_qty = _to_float(_pick(u, "ORGNT_NTBY_QTY", "ORG_NTBY_QTY", "INSTT_NTBY_QTY"))
+            fn_st = min(1.0, max(-1.0, float(fn_pbmn or 0.0) / 5e10)) if raw_fn_pbmn is not None else min(1.0, max(-1.0, fn_qty / 1e6))
+            ins_st = min(1.0, max(-1.0, float(ins_pbmn or 0.0) / 5e10)) if raw_ins_pbmn is not None else min(1.0, max(-1.0, ins_qty / 1e6))
+            return {
+                "symbol": sym,
+                "foreign_net_tr_pbmn": fn_pbmn,
+                "institution_net_tr_pbmn": ins_pbmn,
+                "foreign_net_strength": float(fn_st),
+                "institution_net_strength": float(ins_st),
+            }
+        except Exception as e:
+            logger.warning("foreign-institution-by-symbol %s: %s", sym, e)
+            return {}
+
+    def fetch_program_trade_net_for_symbol(self, symbol: str) -> dict[str, Any]:
+        """
+        당일 종목 프로그램매매 순매수 거래대금(원 단위 근사) — 순위표에 없을 때 종목별 조회 보강.
+
+        실전 계정 전용 가능·모의 미지원. 실패 시 ``{}``.
+        """
+        sym = str(symbol).strip()
+        sym = sym.zfill(6) if sym.isdigit() else sym
+        if not sym:
+            return {}
+        try:
+            body = self._get(
+                ep.URL_PROGRAM_TRADE_BY_STOCK,
+                {
+                    "fid_cond_mrkt_div_code": self._market_div,
+                    "fid_input_iscd": sym,
+                    "custtype": "P",
+                },
+                ep.TR_PROGRAM_TRADE_BY_STOCK,
+            )
+            # 이 API는 output(list) 로 내려오는 케이스가 흔함.
+            bar_rows = _coerce_output_list(body, "output2", "output", "output1")
+
+            net_pbmn = 0.0
+            if bar_rows:
+                u = _upper_map(bar_rows[-1])
+                net_pbmn = _to_float(
+                    _pick(u, "WHOL_SMTN_NTBY_TR_PBMN", "NTBY_TR_PBMN", "SMTN_NTBY_TR_PBMN", "PRDY_NTBY_TR_PBMN")
+                )
+                if net_pbmn == 0.0:
+                    any_ntby = _pick_by_key_fragments(u, ("NTBY", "PBMN"), ("ICDC",))
+                    if any_ntby is not None:
+                        net_pbmn = _to_float(any_ntby)
+            if net_pbmn == 0.0 and not bar_rows:
+                return {}
+            return {"program_net_tr_pbmn": net_pbmn, "symbol": sym}
+        except Exception as e:
+            logger.warning("program-trade-by-stock %s: %s", sym, e, exc_info=True)
+            return {}
 
     def _volume_rank_acml_tr_pbmn_by_symbol(self) -> dict[str, float]:
         """meta에 거래대금이 없을 때 거래량순위 응답의 누적거래대금으로 유동성 프록시."""
