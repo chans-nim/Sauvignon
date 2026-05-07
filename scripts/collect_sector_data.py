@@ -38,7 +38,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
 if load_dotenv is not None:
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# KIS 업종 `relative_strength_score`(코호트 내) — `collect_thema_sector_data`와 동일 취지: 등락·상위 대표 거래대금·breadth 위주, 보조: 장중/가속/권. 합 1.0
+# KIS 업종 `relative_strength_score`(코호트 내) — `collect_thema_sector_data`(theme 리포트)와 동일 취지: 등락·상위 대표 거래대금·breadth 위주, 보조: 장중/가속/권. 합 1.0
 SECTOR_STRENGTH_W_SECTOR_RETURN = 0.28
 SECTOR_STRENGTH_W_MEMBER_AVG_RETURN = 0.24
 SECTOR_STRENGTH_W_TOP_VALUE_SUM = 0.18
@@ -390,7 +390,7 @@ def _render_sector_summary_md(rows: list[dict[str, Any]], *, top_n: int) -> str:
         "",
         f"> 생성 시각: {_collection_window_text(rows)}",
         f"> 섹터 수: {len(rows)} / 섹터별 대표 종목 수: {top_n}",
-        "> `collect_thema_sector_data`와 **동일 취지**: **업종 등락**·**상위 대표 거래대금 합**·**상위 평균·breadth**를 우선(주도/실시간), 장중/가속/권은 보조.",
+        "> `collect_thema_sector_data`(theme 리포트)와 **동일 취지**: **업종 등락**·**상위 대표 거래대금 합**·**상위 평균·breadth**를 우선(주도/실시간), 장중/가속/권은 보조.",
         f"> RS 가중(합1): {int(SECTOR_STRENGTH_W_SECTOR_RETURN*100)}/{int(SECTOR_STRENGTH_W_MEMBER_AVG_RETURN*100)}/"
         f"{int(SECTOR_STRENGTH_W_TOP_VALUE_SUM*100)}/{int(SECTOR_STRENGTH_W_MEMBER_POSITIVE*100)}/"
         f"{int(SECTOR_STRENGTH_W_INTRADAY*100)}/{int(SECTOR_STRENGTH_W_ACCELERATION*100)}/{int(SECTOR_STRENGTH_W_RANGE*100)}"
@@ -402,7 +402,7 @@ def _render_sector_summary_md(rows: list[dict[str, Any]], *, top_n: int) -> str:
         "## Top Leaderboard",
         "",
         (
-            f"> **주도/코호트:** 수집된 업종끼리 RS 상대 비교. (thema와 동일하게) **등락·대표 거래대금** 비중이 큼."
+            f"> **주도/코호트:** 수집된 업종끼리 RS 상대 비교. (theme 리포트와 동일하게) **등락·대표 거래대금** 비중이 큼."
         ),
         "",
         f"| 순위 | 섹터 | RS | Top{top_n} 평균 | 상태 | 수집 시각 |",
@@ -760,7 +760,7 @@ def _render_sector_report_html(rows: list[dict[str, Any]], *, top_n: int) -> str
     parts.append(
         "<p>수집 시각: "
         + _escape_html(_collection_window_text(rows))
-        + " · thema와 동일 취지: <strong>등락·상위 대표 거래대금</strong> 우선 · "
+        + " · theme 리포트와 동일 취지: <strong>등락·상위 대표 거래대금</strong> 우선 · "
         f"RS 가중 {wtag} = 섹터등락/대표평균/대표대금합/상승비중/장중/가속/권</p>"
     )
     leader_count = sum(1 for row in rows if dict(row.get("analysis") or {}).get("leader_status") == "주도")
@@ -802,7 +802,7 @@ def _render_sector_report_html(rows: list[dict[str, Any]], *, top_n: int) -> str
     parts.append("</tbody></table>")
     parts.append(
         "<p class=\"lb-footnote\">코호트 내 RS. "
-        "등락·상위 대표 거래대금 합(대표 종목)에 가장 큰 가중(thema와 정합).</p></div></details>"
+        "등락·상위 대표 거래대금 합(대표 종목)에 가장 큰 가중(theme 리포트와 정합).</p></div></details>"
     )
     parts.append(
         f"<details class=\"section fold\" open><summary class=\"section-title\">Sector cards ({len(rows)})</summary><div class=\"grid\">"

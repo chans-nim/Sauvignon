@@ -1,7 +1,7 @@
-# 테마 대/중분류 섹터 리포트: 평일 KST 16:00 (UTC 07:00) + 수동 실행
-# - 이전 thema-sector-* 릴리즈의 theme_snapshot 을 받아 히스토리 디렉터리를 채운 뒤 수집한다.
-# - 수집 후 동일 태그 형식으로 릴리즈하여 다음 실행이 히스토리를 이어 받게 한다.
-name: Collect thema sector data
+# Theme(테마) 대/중분류 섹터 리포트: 평일 KST 16:00 (UTC 07:00) + 수동 실행
+# - 이전 theme-sector-* (및 구 thema-sector-*) 릴리즈의 theme_snapshot 을 받아 히스토리를 채운 뒤 수집한다.
+# - 수집 후 theme-sector- 태그로 릴리즈한다.
+name: Collect theme sector data
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: collect-thema-sector-data
+  group: collect-theme-sector-data
   cancel-in-progress: false
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
             --dest-dir data/theme_history \
             --max-releases 60
 
-      - name: Collect thema sector data
+      - name: Collect theme sector data
         env:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
@@ -57,12 +57,12 @@ jobs:
       - name: Compute release tag (KST)
         id: rel
         run: |
-          echo "tag=thema-sector-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "tag=theme-sector-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish thema sector release
+      - name: Publish theme sector release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python -m scripts.publish_thema_sector_release \
+          python -m scripts.publish_theme_sector_release \
             --repo "${{ github.repository }}" \
             --tag "${{ steps.rel.outputs.tag }}"

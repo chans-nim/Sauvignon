@@ -1,5 +1,5 @@
 """
-`thema-sector-*` GitHub Release에 첨부된 `theme_snapshot_*.json` 자산을 내려받아
+`theme-sector-*`(및 구 `thema-sector-*`) GitHub Release에 첨부된 `theme_snapshot_*.json` 자산을 내려받아
 `data/theme_history/` 를 채운다. CI에서는 수집 전에 실행해 영속 히스토리를 이어 받는다.
 
 태그는 시간순(오래된 것 먼저)으로 처리해, 같은 영업일에 여러 번 릴리즈된 경우
@@ -8,6 +8,7 @@
 예:
   python -m scripts.sync_theme_history_from_github_releases --repo owner/Sauvignon
   python -m scripts.sync_theme_history_from_github_releases --repo owner/Sauvignon --max-releases 45
+  python -m scripts.sync_theme_history_from_github_releases --tag-prefix theme-sector-
 """
 from __future__ import annotations
 
@@ -24,9 +25,9 @@ import requests
 if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.thema_sector_release_lib import (  # noqa: E402
-    THEMA_SECTOR_TAG_PREFIX,
-    thema_sector_tag_sort_key,
+from scripts.theme_sector_release_lib import (  # noqa: E402
+    is_theme_sector_release_tag,
+    theme_sector_tag_sort_key,
 )
 
 THEME_SNAPSHOT_GLOB = "theme_snapshot_*.json"
@@ -93,7 +94,16 @@ def pick_theme_snapshot_asset(assets: list) -> dict | None:
     return matches[0]
 
 
-def http_list_thema_tags(repo: str, *, prefix: str) -> list[str]:
+def _normalize_explicit_prefix(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return s if s.endswith("-") else f"{s}-"
+
+
+def http_list_theme_release_tags(repo: str, *, explicit_prefix: str | None) -> list[str]:
     tags: list[str] = []
     url: str | None = f"https://api.github.com/repos/{repo}/releases?per_page=100"
     while url:
@@ -103,13 +113,13 @@ def http_list_thema_tags(repo: str, *, prefix: str) -> list[str]:
             if not isinstance(rel, dict) or rel.get("draft"):
                 continue
             t = str(rel.get("tag_name") or "").strip()
-            if t.startswith(prefix):
+            if is_theme_sector_release_tag(t, explicit_prefix=explicit_prefix):
                 tags.append(t)
         url = (r.links.get("next") or {}).get("url") or None
     return tags
 
 
-def gh_list_thema_tags(repo: str, *, prefix: str) -> list[str] | None:
+def gh_list_theme_release_tags(repo: str, *, explicit_prefix: str | None) -> list[str] | None:
     try:
         out = subprocess.check_output(
             [
@@ -132,15 +142,19 @@ def gh_list_thema_tags(repo: str, *, prefix: str) -> list[str] | None:
         rows = json.loads(out)
     except json.JSONDecodeError:
         return None
-    return [str(x.get("tagName") or "").strip() for x in rows if str(x.get("tagName") or "").startswith(prefix)]
+    return [
+        str(x.get("tagName") or "").strip()
+        for x in rows
+        if is_theme_sector_release_tag(str(x.get("tagName") or "").strip(), explicit_prefix=explicit_prefix)
+    ]
 
 
-def list_thema_release_tags(repo: str, *, prefix: str) -> list[str]:
-    tags = gh_list_thema_tags(repo, prefix=prefix)
+def list_theme_release_tags(repo: str, *, explicit_prefix: str | None) -> list[str]:
+    tags = gh_list_theme_release_tags(repo, explicit_prefix=explicit_prefix)
     if tags is None:
-        tags = http_list_thema_tags(repo, prefix=prefix)
+        tags = http_list_theme_release_tags(repo, explicit_prefix=explicit_prefix)
     uniq = sorted(set(tags))
-    uniq.sort(key=thema_sector_tag_sort_key)
+    uniq.sort(key=theme_sector_tag_sort_key)
     return uniq
 
 
@@ -158,16 +172,17 @@ def sync_theme_snapshots(
     repo: str,
     dest_dir: Path,
     *,
-    prefix: str = THEMA_SECTOR_TAG_PREFIX,
+    explicit_prefix: str | None,
     max_releases: int,
 ) -> int:
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    tags = list_thema_release_tags(repo, prefix=prefix)
+    tags = list_theme_release_tags(repo, explicit_prefix=explicit_prefix)
     if max_releases > 0:
         tags = tags[-max_releases:]
     if not tags:
-        print(f"[sync-theme-history] no releases with tag prefix {prefix!r} in {repo}")
+        hint = explicit_prefix or "theme-sector-* / legacy thema-sector-*"
+        print(f"[sync-theme-history] no matching releases ({hint}) in {repo}")
         return 0
     print(f"[sync-theme-history] repo={repo} releases={len(tags)} dest={dest_dir}")
     n = 0
@@ -186,7 +201,9 @@ def sync_theme_snapshots(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download theme_snapshot JSONs from thema-sector GitHub releases")
+    parser = argparse.ArgumentParser(
+        description="Download theme_snapshot JSONs from theme-sector (or legacy thema-sector) GitHub releases"
+    )
     parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "chans-nim/Sauvignon"), help="owner/repo")
     parser.add_argument(
         "--dest-dir",
@@ -196,8 +213,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--tag-prefix",
-        default=THEMA_SECTOR_TAG_PREFIX,
-        help=f"Release tag prefix (default: {THEMA_SECTOR_TAG_PREFIX!r})",
+        default="",
+        help="비우면 theme-sector-* 와 구 thema-sector-* 모두. 지정 시 해당 접두사만 (예: theme-sector-).",
     )
     parser.add_argument(
         "--max-releases",
@@ -207,10 +224,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     repo = parse_repo_from_url(args.repo)
-    prefix = str(args.tag_prefix or THEMA_SECTOR_TAG_PREFIX)
-    if not prefix.endswith("-"):
-        prefix = prefix + "-"
-    n = sync_theme_snapshots(repo, args.dest_dir, prefix=prefix, max_releases=max(0, int(args.max_releases)))
+    explicit = _normalize_explicit_prefix(args.tag_prefix)
+    n = sync_theme_snapshots(repo, args.dest_dir, explicit_prefix=explicit, max_releases=max(0, int(args.max_releases)))
     print(f"[sync-theme-history] done, downloaded {n} snapshot(s)")
 
 

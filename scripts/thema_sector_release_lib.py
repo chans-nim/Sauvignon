@@ -1,15 +1,16 @@
-"""Shared helpers for thema-sector GitHub releases (tag format, sort keys)."""
+"""Backward compatibility: use `scripts.theme_sector_release_lib`."""
 
 from __future__ import annotations
 
-import re
+from scripts.theme_sector_release_lib import (  # noqa: F401
+    LEGACY_THEMA_SECTOR_TAG_PREFIX,
+    LEGACY_THEMA_SECTOR_TAG_RE,
+    THEME_SECTOR_TAG_PREFIX,
+    THEME_SECTOR_TAG_RE,
+    is_theme_sector_release_tag,
+    theme_sector_tag_sort_key,
+)
 
-THEMA_SECTOR_TAG_PREFIX = "thema-sector-"
-THEMA_SECTOR_TAG_RE = re.compile(r"^thema-sector-(\d{8})-(\d{4})$")
-
-
-def thema_sector_tag_sort_key(tag: str) -> tuple:
-    m = THEMA_SECTOR_TAG_RE.match(str(tag).strip())
-    if m:
-        return (0, m.group(1), m.group(2))
-    return (1, str(tag), "")
+THEMA_SECTOR_TAG_PREFIX = THEME_SECTOR_TAG_PREFIX
+THEMA_SECTOR_TAG_RE = THEME_SECTOR_TAG_RE
+thema_sector_tag_sort_key = theme_sector_tag_sort_key

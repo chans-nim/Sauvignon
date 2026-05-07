@@ -16,7 +16,7 @@ from scripts.collect_thema_sector_data import (
     calculate_persistence_score,
     _score_group_members,
     _select_quote_symbols,
-    _render_thema_report_html,
+    _render_theme_report_html,
     _resolve_classification_json,
 )
 
@@ -104,7 +104,7 @@ def test_build_thema_rows_and_render_html() -> None:
     assert len(jangbi["major_stocks"]) == 1
     assert jangbi["analysis"]["top_stocks_shown"] == 1
 
-    html = _render_thema_report_html(
+    html = _render_theme_report_html(
         source_path=Path("dummy.json"),
         collected_at="2026-04-21T16:10:00+09:00",
         meta={
@@ -118,7 +118,7 @@ def test_build_thema_rows_and_render_html() -> None:
         middle_rows=middle_rows,
         top_n=3,
     )
-    assert "Thema Major/Middle Sector Overview" in html
+    assert "Theme Major/Middle Sector Overview" in html
     assert 'href="https://finance.naver.com/item/main.naver?code=005930"' in html
     assert "외국인 순매수(억)" in html
     assert "프로그램 순매수(억)" in html
@@ -133,7 +133,7 @@ def test_build_thema_rows_and_render_html() -> None:
     assert 'class="pos"' in html
     assert 'class="neg"' in html
     assert ">RS<" in html
-    assert "Thema RS" not in html
+    assert "Theme RS" not in html
 
 
 def test_resolve_classification_json_falls_back_to_repo_path(monkeypatch, tmp_path) -> None:

@@ -3,7 +3,7 @@ GitHub Release에 올라간 스냅샷 parquet을 다운로드해서 로컬 silve
 이후 incremental/gap_fill/build_snapshot을 돌리기 위한 "베이스 데이터" 동기화 용도.
 
 ``--tag`` 미지정 시 원격 "최신"은 ``data-(snapshot|full|delta)-*`` 태그만 본다.
-같은 저장소의 ``thema-sector-*`` 등 다른 릴리즈가 더 최근이어도 무시한다.
+같은 저장소의 ``theme-sector-*`` / 구 ``thema-sector-*`` 등 다른 릴리즈가 더 최근이어도 무시한다.
 
 요구사항:
 - gh CLI 필요 (GitHub Actions runner에는 기본 제공)
@@ -113,7 +113,7 @@ DATASET_RELEASE_TAG_RE = re.compile(r"^data-(?:snapshot|full|delta)-(\d{8})-(\d{
 
 
 def is_dataset_release_tag(tag: str) -> bool:
-    """Silver/스냅샷 동기화 대상 태그만 true (thema-sector-* 등 다른 릴리즈는 제외)."""
+    """Silver/스냅샷 동기화 대상 태그만 true (theme-sector-* 등 다른 릴리즈는 제외)."""
     return bool(DATASET_RELEASE_TAG_RE.match(str(tag).strip()))
 
 
@@ -178,12 +178,12 @@ def gh_latest_dataset_tag_optional(repo: str) -> str | None:
 
 
 def gh_latest_dataset_tag(repo: str) -> str:
-    """최신 data-snapshot|full|delta 릴리즈 태그 (thema-sector 등 비데이터셋 릴리즈는 건너뜀)."""
+    """최신 data-snapshot|full|delta 릴리즈 태그 (theme-sector 등 비데이터셋 릴리즈는 건너뜀)."""
     out = gh_latest_dataset_tag_optional(repo)
     if not out:
         raise SystemExit(
             f"No data-(snapshot|full|delta)-* releases found in {repo} "
-            "(non-dataset releases, e.g. thema-sector-*, are ignored for silver sync)."
+            "(non-dataset releases, e.g. theme-sector-*, are ignored for silver sync)."
         )
     return out
 

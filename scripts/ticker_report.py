@@ -308,7 +308,7 @@ def _gh_latest_dataset_tag_optional_with_pat(repo: str) -> str | None:
 
 
 def remote_latest_release_tag(repo: str) -> str | None:
-    """data-snapshot|full|delta 릴리즈만 후보로 삼는다 (thema-sector-* 등 제외)."""
+    """data-snapshot|full|delta 릴리즈만 후보로 삼는다 (theme-sector-* 등 제외)."""
     r = parse_repo_from_url(repo)
     return _gh_latest_dataset_tag_optional_with_pat(r) or http_latest_dataset_tag(r)
 
@@ -462,7 +462,7 @@ def load_release_series(
     GitHub Release 스냅샷 parquet에서 해당 종목 OHLCV 시계열 + 수집·릴리즈 메타를 반환한다.
 
     기본(--release-tag 없음): 로컬 data_manifest.json 과 GitHub의 최신 data-(snapshot|full|delta)-* 태그 중
-    타임스탬프가 더 새 쪽을 사용한다 (thema-sector-* 등 비데이터셋 릴리즈는 후보에서 제외).
+    타임스탬프가 더 새 쪽을 사용한다 (theme-sector-* 등 비데이터셋 릴리즈는 후보에서 제외).
     """
     import duckdb
 

@@ -199,7 +199,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p _tmp
-          echo "Fetching latest data snapshot/full/delta release (skips thema-sector etc.)..."
+          echo "Fetching latest data snapshot/full/delta release (skips theme-sector etc.)..."
           LATEST_TAG=$(python3 - <<'PY'
           import json, os, re, subprocess
           pat = re.compile(r"^data-(?:snapshot|full|delta)-\d{8}-\d{4}$")

@@ -1,5 +1,5 @@
 """
-Thema 대분류/중분류 기반 섹터 리포트 생성기.
+Theme(테마) 대분류/중분류 기반 섹터 리포트 생성기.
 
 기존 KIS 업종 리포트(`scripts.collect_sector_data`)와 별개로 실행한다.
 
@@ -567,7 +567,7 @@ def _dedupe_stocks(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(out.values())
 
 
-def _sort_thema_members(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _sort_theme_members(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
         stocks,
         key=lambda x: (
@@ -612,7 +612,7 @@ def _build_group_blueprints(data: dict[str, Any]) -> tuple[list[dict[str, Any]],
                     "display_path": f"{major} > {middle}",
                     "member_count": len(stocks),
                     "sub_category_count": None,
-                    "stocks": _sort_thema_members(stocks),
+                    "stocks": _sort_theme_members(stocks),
                 }
             )
             major_stocks_raw.extend(stocks)
@@ -625,7 +625,7 @@ def _build_group_blueprints(data: dict[str, Any]) -> tuple[list[dict[str, Any]],
                 "display_path": major,
                 "member_count": len(_dedupe_stocks(major_stocks_raw)),
                 "sub_category_count": valid_sub_count,
-                "stocks": _sort_thema_members(_dedupe_stocks(major_stocks_raw)),
+                "stocks": _sort_theme_members(_dedupe_stocks(major_stocks_raw)),
             }
         )
     return major_rows, middle_rows
@@ -1278,7 +1278,7 @@ def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[
     return lines
 
 
-def _render_thema_summary_md(
+def _render_theme_summary_md(
     *,
     source_path: Path,
     collected_at: str,
@@ -1288,7 +1288,7 @@ def _render_thema_summary_md(
     top_n: int = 5,
 ) -> str:
     lines = [
-        "# Thema Major/Middle Sector Overview",
+        "# Theme Major/Middle Sector Overview",
         "",
         f"> 분류 원본: {source_path}",
         f"> 생성 시각: {_fmt_ts(collected_at)}",
@@ -1585,7 +1585,7 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
     return "".join(parts)
 
 
-def _render_thema_report_html(
+def _render_theme_report_html(
     *,
     source_path: Path,
     collected_at: str,
@@ -1597,7 +1597,7 @@ def _render_thema_report_html(
     leader_count = sum(1 for row in major_rows + middle_rows if dict(row.get("analysis") or {}).get("leader_status") == "주도")
     return (
         "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        "<title>Thema Major/Middle Sector Overview</title>"
+        "<title>Theme Major/Middle Sector Overview</title>"
         "<style>"
         ":root{--bg:#0b1020;--panel:#ffffff;--panel-soft:#f4f7fb;--text:#111827;--muted:#667085;--line:#e5e7eb;--leader:#0ea5e9;--watch:#f59e0b;}"
         "body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:linear-gradient(180deg,#0b1020 0,#10182d 280px,#eef3f8 280px,#eef3f8 100%);color:var(--text);}"
@@ -1624,7 +1624,7 @@ def _render_thema_report_html(
         "a{color:#1d4ed8;text-decoration:none;}a:hover{text-decoration:underline;}@media (max-width:720px){.wrap{padding:18px 14px 36px;}.hero{padding:22px 20px;}.card-head{flex-direction:column;}.rs-box{text-align:left;}}"
         "</style></head><body><div class=\"wrap\">"
         "<section class=\"hero\">"
-        "<h1>Thema Major/Middle Sector Overview</h1>"
+        "<h1>Theme Major/Middle Sector Overview</h1>"
         f"<p>분류 원본: {_escape_html(source_path)}<br>생성 시각: {_escape_html(_fmt_ts(collected_at))}<br>"
         f"대분류 {meta.get('major_category_count', '-')} / 중분류 {meta.get('middle_category_count', '-')} / "
         f"종목 {meta.get('unique_stock_count', '-')} / 라이브 신호 {meta.get('live_signal_symbol_count', '-')} / "
@@ -1648,7 +1648,7 @@ def _render_thema_report_html(
 
 def _telegram_summary(collected_at: str, major_rows: list[dict[str, Any]], middle_rows: list[dict[str, Any]]) -> str:
     lines = [
-        "Thema 대/중분류 섹터 리포트 생성 완료",
+        "Theme 대/중분류 섹터 리포트 생성 완료",
         f"- 생성 시각: {_fmt_ts(collected_at)}",
         "- 대분류 상위 3:",
     ]
@@ -1663,13 +1663,13 @@ def _telegram_summary(collected_at: str, major_rows: list[dict[str, Any]], middl
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Thema 대분류/중분류 기반 섹터 리포트 생성")
+    parser = argparse.ArgumentParser(description="Theme 대분류/중분류 기반 섹터 리포트 생성")
     parser.add_argument("--mode", choices=("paper", "real"), default="real", help="KIS mode for quote enrichment.")
     parser.add_argument(
         "--classification-json",
         type=Path,
         default=DEFAULT_CLASSIFICATION_JSON,
-        help="Thema classification JSON path.",
+        help="Theme classification JSON path.",
     )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Output directory.")
     parser.add_argument("--theme-history-dir", type=Path, default=DEFAULT_THEME_HISTORY_DIR, help="Theme snapshot history directory.")
@@ -2035,7 +2035,7 @@ def main() -> None:
     html_path = out_dir / "overview.html"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     md_path.write_text(
-        _render_thema_summary_md(
+        _render_theme_summary_md(
             source_path=source_path,
             collected_at=collected_at,
             meta=meta,
@@ -2046,7 +2046,7 @@ def main() -> None:
         encoding="utf-8",
     )
     html_path.write_text(
-        _render_thema_report_html(
+        _render_theme_report_html(
             source_path=source_path,
             collected_at=collected_at,
             meta=meta,
