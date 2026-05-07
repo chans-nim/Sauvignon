@@ -51,6 +51,7 @@ def write_index_json(
     snapshot_path: Path,
     overview_json: Path,
     overview_html: Path,
+    classification_json: Path | None = None,
 ) -> None:
     snap_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
     snapshot_date = str(snap_payload.get("date") or "").strip()
@@ -61,6 +62,8 @@ def write_index_json(
         "theme_snapshot_asset": snapshot_path.name,
         "overview_assets": [overview_json.name, overview_html.name],
     }
+    if classification_json and classification_json.is_file():
+        payload["classification_asset"] = classification_json.name
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -103,6 +106,12 @@ def main() -> None:
     parser.add_argument("--theme-history-dir", type=Path, default=Path("data/theme_history"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/lake/sector/thema_major_middle"))
     parser.add_argument(
+        "--classification-json",
+        type=Path,
+        default=Path("data/theme/theme_major_middle_stock_classification_dup_allowed.json"),
+        help="Theme classification JSON to attach to the release (optional; default: data/theme/...).",
+    )
+    parser.add_argument(
         "--snapshot-date",
         default=None,
         help="YYYY-MM-DD for theme_snapshot (default: read from overview.json metadata)",
@@ -125,6 +134,9 @@ def main() -> None:
 
     history_dir = Path(args.theme_history_dir)
     snapshot_path = pick_snapshot_for_date(history_dir, snap_date)
+    classification_json = Path(args.classification_json)
+    if not classification_json.is_file():
+        classification_json = None
 
     with tempfile.TemporaryDirectory() as tmp:
         index_path = Path(tmp) / "thema_history_index.json"
@@ -134,6 +146,7 @@ def main() -> None:
             snapshot_path=snapshot_path,
             overview_json=overview_json,
             overview_html=overview_html,
+            classification_json=classification_json,
         )
         title = f"Thema sector run {args.tag}"
         notes = (
@@ -141,6 +154,8 @@ def main() -> None:
             "Prior snapshots: `python -m scripts.sync_theme_history_from_github_releases`"
         )
         files = [snapshot_path, overview_json, overview_html, index_path]
+        if classification_json:
+            files.append(classification_json)
         if gh_release_exists(repo, args.tag):
             print(f"[publish-thema] release exists, uploading assets: {args.tag}")
             gh_release_upload(repo, args.tag, files)
