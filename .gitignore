@@ -27,8 +27,10 @@ venv/
 /release_validation_report*.md
 /backups/
 
-# Local data lake and staging outputs
-data/
+# Local data lake and staging outputs (tracked: theme 분류 JSON 1개만 예외)
+data/**
+!data/theme/
+!data/theme/theme_major_middle_stock_classification_dup_allowed.json
 staging/
 meta/
 

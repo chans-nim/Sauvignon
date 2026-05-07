@@ -5,7 +5,7 @@ Thema 대분류/중분류 기반 섹터 리포트 생성기.
 
 예시:
   python -m scripts.collect_thema_sector_data
-  python -m scripts.collect_thema_sector_data --mode real --classification-json "C:/Users/me/Downloads/thema_major_middle_stock_classification_dup_allowed.json"
+  python -m scripts.collect_thema_sector_data --mode real --classification-json "C:/Users/me/Downloads/theme_major_middle_stock_classification_dup_allowed.json"
   python -m scripts.collect_thema_sector_data --no-quote-enrichment
   python -m scripts.collect_thema_sector_data --full-quote-enrichment
   python -m scripts.collect_thema_sector_data --mode real --telegram
@@ -17,7 +17,7 @@ Thema 대분류/중분류 기반 섹터 리포트 생성기.
 
 외국인·기관 순매수 거래대금은 **순위 API 한 번**으로 합산·표시(순위에 없거나 코드 불일치 시 `-`).
 
-분류 JSON는 `~/Downloads/...` 대신 `data/lake/sector/thema_major_middle_stock_classification_dup_allowed.json` 에 두어도 기본 인자로 인식한다.
+분류 JSON는 `~/Downloads/...` 대신 저장소 `data/theme/theme_major_middle_stock_classification_dup_allowed.json` 에 두면 기본 인자로 인식한다(구 경로 `data/lake/sector/thema_*` 도 폴백).
 """
 
 from __future__ import annotations
@@ -62,7 +62,8 @@ def _fmt_signed_eok(x: Any) -> str:
 from sector_scanner.kis_client import build_kis_client_for_mode
 
 
-_CLASSIFICATION_BASENAME = "thema_major_middle_stock_classification_dup_allowed.json"
+_CLASSIFICATION_BASENAME = "theme_major_middle_stock_classification_dup_allowed.json"
+_LEGACY_CLASSIFICATION_BASENAME = "thema_major_middle_stock_classification_dup_allowed.json"
 DEFAULT_CLASSIFICATION_JSON = Path.home() / "Downloads" / _CLASSIFICATION_BASENAME
 DEFAULT_OUTPUT_DIR = Path("data/lake/sector/thema_major_middle")
 DEFAULT_THEME_HISTORY_DIR = Path("data/theme_history")
@@ -86,11 +87,19 @@ STOCK_RS_W_NEAR_HIGH = 0.05
 
 
 def _repo_classification_json() -> Path:
-    return Path(__file__).resolve().parent.parent / "data" / "lake" / "sector" / _CLASSIFICATION_BASENAME
+    return Path(__file__).resolve().parent.parent / "data" / "theme" / _CLASSIFICATION_BASENAME
+
+
+def _legacy_repo_classification_json() -> Path:
+    return Path(__file__).resolve().parent.parent / "data" / "lake" / "sector" / _LEGACY_CLASSIFICATION_BASENAME
+
+
+def _legacy_downloads_classification_json() -> Path:
+    return Path.home() / "Downloads" / _LEGACY_CLASSIFICATION_BASENAME
 
 
 def _resolve_classification_json(requested: Path) -> Path:
-    """Use repo `data/lake/sector/<basename>` when the default Downloads path is missing."""
+    """기본 Downloads 경로에 없으면 repo `data/theme/…` → 구 `data/lake/sector/thema_…` → Downloads 구 파일명 순으로 찾는다."""
     if requested.is_file():
         return requested
     try:
@@ -101,6 +110,12 @@ def _resolve_classification_json(requested: Path) -> Path:
         alt = _repo_classification_json()
         if alt.is_file():
             return alt
+        leg = _legacy_repo_classification_json()
+        if leg.is_file():
+            return leg
+        leg_dl = _legacy_downloads_classification_json()
+        if leg_dl.is_file():
+            return leg_dl
     return requested
 
 
@@ -1701,7 +1716,7 @@ def main() -> None:
     if not source_path.is_file():
         raise SystemExit(
             f"classification json not found: {source_path} "
-            f"(place {_CLASSIFICATION_BASENAME} there or under data/lake/sector/ in the repo)"
+            f"(place under data/theme/{_CLASSIFICATION_BASENAME} in the repo, or ~/Downloads/, or use --classification-json)"
         )
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
