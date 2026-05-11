@@ -8,6 +8,8 @@
   python -m scripts.collect_sector_data --mode real --sector 0002 --members
 
 환경 변수: KIS_APP_KEY, KIS_APP_SECRET (paper 모드 시 KIS_PAPER_*)
+Telegram SSL(프록시/SSL 검사): TELEGRAM_CA_BUNDLE, SSL_CERT_FILE, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE(존재하는 PEM 파일),
+  CLI `--telegram-ca-bundle`, 또는 `--telegram-insecure-ssl` / TELEGRAM_INSECURE_SSL=1(비권장).
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import html
 import json
 import mimetypes
 import os
+import ssl
 import sys
 import time
 import uuid
@@ -586,6 +589,53 @@ def _naver_finance_stock_url(symbol: str) -> str:
     return f"https://finance.naver.com/item/main.naver?code={parse.quote(code)}"
 
 
+def _telegram_ca_bundle_path() -> str:
+    """PEM 번들 경로: 회사 PC는 REQUESTS_CA_BUNDLE 등만 잡혀 있는 경우가 많다."""
+    for key in ("TELEGRAM_CA_BUNDLE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        raw = os.getenv(key, "").strip()
+        if not raw:
+            continue
+        p = Path(raw).expanduser()
+        if p.is_file():
+            return str(p.resolve())
+    return ""
+
+
+def _telegram_ssl_context() -> ssl.SSLContext | None:
+    """SSL 검사·프록시 환경에서 Telegram HTTPS 검증을 맞추기 위한 컨텍스트."""
+    flag = os.getenv("TELEGRAM_INSECURE_SSL", "").strip().lower()
+    if flag in ("1", "true", "yes"):
+        return ssl._create_unverified_context()
+    cafile = _telegram_ca_bundle_path()
+    if cafile:
+        return ssl.create_default_context(cafile=cafile)
+    return None
+
+
+def _telegram_ssl_status_line() -> str:
+    if os.getenv("TELEGRAM_INSECURE_SSL", "").strip().lower() in ("1", "true", "yes"):
+        return "Telegram TLS: verify OFF (TELEGRAM_INSECURE_SSL)"
+    ca = _telegram_ca_bundle_path()
+    if ca:
+        return f"Telegram TLS: custom CA file {ca}"
+    return (
+        "Telegram TLS: default verify (set TELEGRAM_CA_BUNDLE / SSL_CERT_FILE / REQUESTS_CA_BUNDLE, "
+        "or use --telegram-ca-bundle / --telegram-insecure-ssl)"
+    )
+
+
+def _apply_telegram_ssl_from_args(*, ca_bundle: str = "", insecure: bool = False) -> None:
+    """CLI가 환경 변수보다 확실히 적용되도록 프로세스 env를 갱신한다."""
+    if insecure:
+        os.environ["TELEGRAM_INSECURE_SSL"] = "1"
+    ca = str(ca_bundle or "").strip()
+    if ca:
+        resolved = Path(ca).expanduser().resolve()
+        if not resolved.is_file():
+            raise SystemExit(f"--telegram-ca-bundle is not a file: {ca}")
+        os.environ["TELEGRAM_CA_BUNDLE"] = str(resolved)
+
+
 def _build_telegram_summary(rows: list[dict[str, Any]], *, top_k: int = 5) -> str:
     lines = [
         "섹터 리포트 생성 완료",
@@ -614,10 +664,14 @@ def _http_post(
 ) -> dict[str, Any]:
     last_error: Exception | None = None
     attempts = max(1, int(retries) + 1)
+    ssl_ctx = _telegram_ssl_context()
     for attempt in range(1, attempts + 1):
         try:
             req = request.Request(url, data=data, headers=headers, method="POST")
-            with request.urlopen(req, timeout=timeout_seconds) as resp:
+            open_kw: dict[str, Any] = {"timeout": timeout_seconds}
+            if ssl_ctx is not None:
+                open_kw["context"] = ssl_ctx
+            with request.urlopen(req, **open_kw) as resp:
                 body = resp.read().decode("utf-8")
             return json.loads(body)
         except (TimeoutError, OSError, URLError, ValueError) as exc:
@@ -1057,6 +1111,16 @@ def main() -> None:
         default=os.getenv("TELEGRAM_MESSAGE_THREAD_ID", ""),
         help="Optional Telegram message thread id (forum topic).",
     )
+    parser.add_argument(
+        "--telegram-ca-bundle",
+        default="",
+        help="PEM CA bundle path for Telegram HTTPS (or set TELEGRAM_CA_BUNDLE / SSL_CERT_FILE / REQUESTS_CA_BUNDLE).",
+    )
+    parser.add_argument(
+        "--telegram-insecure-ssl",
+        action="store_true",
+        help="Disable TLS verification for Telegram only (MITM risk; use when corporate SSL inspection breaks verify).",
+    )
     args = parser.parse_args()
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -1168,6 +1232,11 @@ def main() -> None:
         print(f"Wrote {md_path}")
         print(f"Wrote {html_path}")
         if args.telegram:
+            _apply_telegram_ssl_from_args(
+                ca_bundle=str(args.telegram_ca_bundle or ""),
+                insecure=bool(args.telegram_insecure_ssl),
+            )
+            print(_telegram_ssl_status_line(), file=sys.stderr)
             bot_token = str(args.telegram_bot_token or "").strip()
             chat_id = str(args.telegram_chat_id or "").strip()
             thread_id = str(args.telegram_thread_id or "").strip() or None
@@ -1187,6 +1256,12 @@ def main() -> None:
                 print("Telegram report sent.")
             except Exception as exc:
                 print(f"WARNING: Telegram send failed: {exc}", file=sys.stderr)
+                if "CERTIFICATE_VERIFY_FAILED" in str(exc) or "certificate verify failed" in str(exc).lower():
+                    print(
+                        "Hint: PowerShell 같은 세션에서 $env:TELEGRAM_INSECURE_SSL 확인 후, "
+                        "또는 `--telegram-insecure-ssl` / `--telegram-ca-bundle C:\\path\\corp.pem` 로 재시도.",
+                        file=sys.stderr,
+                    )
     elif args.telegram:
         raise SystemExit("--telegram 은 --all-sectors 와 함께 사용해야 합니다.")
 

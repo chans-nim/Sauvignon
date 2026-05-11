@@ -38,6 +38,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.collect_sector_data import (
+    _apply_telegram_ssl_from_args,
     _escape_html,
     _fmt_eok,
     _fmt_num,
@@ -47,6 +48,7 @@ from scripts.collect_sector_data import (
     _pct_rank_map,
     _send_telegram_document,
     _send_telegram_message,
+    _telegram_ssl_status_line,
 )
 
 
@@ -1706,6 +1708,16 @@ def main() -> None:
         default=os.getenv("TELEGRAM_MESSAGE_THREAD_ID", ""),
         help="Optional Telegram message thread id.",
     )
+    parser.add_argument(
+        "--telegram-ca-bundle",
+        default="",
+        help="PEM CA bundle for Telegram HTTPS (see scripts.collect_sector_data TELEGRAM_* / REQUESTS_CA_BUNDLE).",
+    )
+    parser.add_argument(
+        "--telegram-insecure-ssl",
+        action="store_true",
+        help="Disable TLS verify for Telegram only (corporate SSL inspection).",
+    )
     args = parser.parse_args()
     if bool(args.no_quote_enrichment) and bool(args.full_quote_enrichment):
         raise SystemExit("--no-quote-enrichment 와 --full-quote-enrichment 는 함께 쓸 수 없습니다.")
@@ -2061,6 +2073,11 @@ def main() -> None:
     print(f"Wrote {html_path}")
 
     if args.telegram:
+        _apply_telegram_ssl_from_args(
+            ca_bundle=str(args.telegram_ca_bundle or ""),
+            insecure=bool(args.telegram_insecure_ssl),
+        )
+        print(_telegram_ssl_status_line(), file=sys.stderr)
         bot_token = str(args.telegram_bot_token or "").strip()
         chat_id = str(args.telegram_chat_id or "").strip()
         thread_id = str(args.telegram_thread_id or "").strip() or None
@@ -2075,6 +2092,11 @@ def main() -> None:
             print("Telegram report sent.")
         except Exception as exc:
             print(f"WARNING: Telegram send failed: {exc}", file=sys.stderr)
+            if "CERTIFICATE_VERIFY_FAILED" in str(exc) or "certificate verify failed" in str(exc).lower():
+                print(
+                    "Hint: `--telegram-insecure-ssl` 또는 `--telegram-ca-bundle C:\\path\\corp.pem` 로 재시도.",
+                    file=sys.stderr,
+                )
 
 
 if __name__ == "__main__":
