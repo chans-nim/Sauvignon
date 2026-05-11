@@ -1,48 +1,48 @@
 {
   "schema_version": 2,
   "latest_current": {
-    "tag": "data-snapshot-20260508-0516",
+    "tag": "data-snapshot-20260511-1409",
     "release_type": "snapshot",
-    "file_name": "data-snapshot-20260508-0516.parquet",
-    "sha256": "9382c252dbe2e421d847c7cff1e429daf268f41f9c62c4c90914a416d408b646",
-    "row_count": 7147654,
-    "created_at": "2026-05-08T05:17:26Z",
+    "file_name": "data-snapshot-20260511-1409.parquet",
+    "sha256": "0312d996d922d326fba5669d84890e81e5e20b34157cc2f5e21762af0a6415c8",
+    "row_count": 7151915,
+    "created_at": "2026-05-11T14:09:54Z",
     "min_date": "2016-01-04",
-    "max_date": "2026-05-08",
+    "max_date": "2026-05-11",
     "assets": [
       {
-        "name": "data-snapshot-20260508-0516.json",
-        "sha256": "2c46a450b38f03bc45f54a3a6d80387dbe25735a254d212296a49548aefc6941",
-        "bytes": 1498,
-        "updated_at": "2026-05-08T05:17:26Z",
+        "name": "data-snapshot-20260511-1409.json",
+        "sha256": "813b31363ec9a8e2641f7570631cef8fc61fc434c12357b8d02e300fd6966e4c",
+        "bytes": 1496,
+        "updated_at": "2026-05-11T14:09:54Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260508-0516.output1-latest.parquet",
-        "sha256": "c7701fde193576fabe408add65ab1eb3973af977e82c75710d90b38dd9216a80",
-        "bytes": 1659200,
-        "updated_at": "2026-05-08T05:17:26Z",
+        "name": "data-snapshot-20260511-1409.output1-latest.parquet",
+        "sha256": "f045142b5be96186b4785bb4d7b8cda6fa4413670888bf28ccb22ec66c9051fe",
+        "bytes": 95240,
+        "updated_at": "2026-05-11T14:09:54Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260508-0516.parquet",
-        "sha256": "9382c252dbe2e421d847c7cff1e429daf268f41f9c62c4c90914a416d408b646",
-        "bytes": 140963517,
-        "updated_at": "2026-05-08T05:17:26Z",
+        "name": "data-snapshot-20260511-1409.parquet",
+        "sha256": "0312d996d922d326fba5669d84890e81e5e20b34157cc2f5e21762af0a6415c8",
+        "bytes": 137252572,
+        "updated_at": "2026-05-11T14:09:54Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260508-0516.sha256",
-        "sha256": "7184c055c0f4550132fe1236603c5eac1fef402916a44b580d257a0106318d85",
+        "name": "data-snapshot-20260511-1409.sha256",
+        "sha256": "de4bbbe08766ce098ce6ac458cd5a1442ba97973d2cf43776da9469075e33941",
         "bytes": 65,
-        "updated_at": "2026-05-08T05:17:26Z",
+        "updated_at": "2026-05-11T14:09:54Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260508-0516.ticker-state.parquet",
-        "sha256": "98d3ff5080218c8f2ec12ad20d81ff96c8fca59fed0ab52e286b2754024203ec",
-        "bytes": 192557,
-        "updated_at": "2026-05-08T05:17:26Z",
+        "name": "data-snapshot-20260511-1409.ticker-state.parquet",
+        "sha256": "fba1d0b567c9a8097eb06f9ba0ad855d5b7f4ac8fb204bc3534c3c275fb4425a",
+        "bytes": 189490,
+        "updated_at": "2026-05-11T14:09:54Z",
         "release_type": "snapshot"
       }
     ]
@@ -60,10 +60,30 @@
     "assets": []
   },
   "release_type": "snapshot",
-  "row_count": 7147654,
-  "created_at": "2026-05-08T05:17:26Z",
+  "row_count": 7151915,
+  "created_at": "2026-05-11T14:09:54Z",
   "history": {
     "release_tags": [
+      {
+        "tag": "data-snapshot-20260511-1409",
+        "release_type": "snapshot",
+        "created_at": "2026-05-11T14:09:54Z"
+      },
+      {
+        "tag": "data-snapshot-20260511-0552",
+        "release_type": "snapshot",
+        "created_at": "2026-05-11T05:52:53Z"
+      },
+      {
+        "tag": "data-snapshot-20260511-0707",
+        "release_type": "snapshot",
+        "created_at": "2026-05-10T22:07:32Z"
+      },
+      {
+        "tag": "data-snapshot-20260508-1229",
+        "release_type": "snapshot",
+        "created_at": "2026-05-08T12:30:07Z"
+      },
       {
         "tag": "data-snapshot-20260508-0516",
         "release_type": "snapshot",
