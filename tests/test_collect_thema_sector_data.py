@@ -11,6 +11,8 @@ from scripts.collect_thema_sector_data import (
     _all_unique_stock_symbols_from_groups,
     _build_group_blueprints,
     _build_rows,
+    _build_theme_daily_leader_history_sections,
+    _render_theme_history_calendar_html,
     classify_theme_quality,
     calculate_breadth_score,
     calculate_persistence_score,
@@ -134,6 +136,63 @@ def test_build_thema_rows_and_render_html() -> None:
     assert 'class="neg"' in html
     assert ">RS<" in html
     assert "Theme RS" not in html
+    assert "주도테마 캘린더·히스토리" in html
+    assert "cal-wrap" in html
+
+
+def test_build_theme_daily_leader_history_sections_prefers_today_live() -> None:
+    history_rows = [
+        {
+            "date": "2026-05-01",
+            "group_type": "middle",
+            "major_category": "A",
+            "middle_category": "B",
+            "leader_status": "주도",
+            "theme_rs": 70.0,
+            "theme_rank": 1,
+            "leader_top_stocks": [{"symbol": "000001", "name": "Old", "rs": 50.0}],
+        }
+    ]
+    major_rows: list[dict] = []
+    middle_rows = [
+        {
+            "group_type": "middle",
+            "display_path": "A > B",
+            "major_category": "A",
+            "middle_category": "B",
+            "major_stocks": [{"symbol": "000002", "name": "Live", "rs": 90.0}],
+            "analysis": {"leader_status": "주도", "relative_strength_score": 88.0, "relative_strength_rank": 1},
+        }
+    ]
+    sections = _build_theme_daily_leader_history_sections(
+        history_rows,
+        "2026-05-10",
+        major_rows,
+        middle_rows,
+        top_n=3,
+        max_days=5,
+    )
+    by_d = dict(sections)
+    assert "2026-05-10" in by_d
+    assert by_d["2026-05-10"][0]["leader_top_stocks"][0]["symbol"] == "000002"
+    assert "2026-05-01" in by_d
+
+
+def test_theme_history_calendar_shows_one_stock_per_theme() -> None:
+    by_date = {
+        "2026-05-10": [
+            {
+                "display_path": "반도체 > 메모리",
+                "leader_top_stocks": [
+                    {"symbol": "000660", "name": "SK", "rs": 90.0},
+                    {"symbol": "005930", "name": "SEC", "rs": 50.0},
+                ],
+            }
+        ]
+    }
+    html = _render_theme_history_calendar_html(by_date, "2026-05-10")
+    assert "SK" in html and "000660" in html
+    assert "005930" not in html
 
 
 def test_resolve_classification_json_falls_back_to_repo_path(monkeypatch, tmp_path) -> None:

@@ -353,6 +353,357 @@ def _write_theme_history_snapshot(history_dir: Path, *, date_yyyy_mm_dd: str, ro
     return path
 
 
+def _history_display_path_from_row(r: dict[str, Any]) -> str:
+    dp = str(r.get("display_path") or "").strip()
+    if dp:
+        return dp
+    major = str(r.get("major_category") or "").strip()
+    middle = r.get("middle_category")
+    gt = str(r.get("group_type") or "")
+    if gt == "major":
+        return major or "-"
+    mid = "" if middle is None else str(middle).strip()
+    if major and mid:
+        return f"{major} > {mid}"
+    return major or mid or "-"
+
+
+def _first_leader_stock(stocks: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    for s in stocks or []:
+        if _norm_kis_stock_symbol(s.get("symbol", "")):
+            return s
+    return None
+
+
+def _full_leader_history_by_date(
+    history_rows: list[dict[str, Any]],
+    today: str,
+    major_rows: list[dict[str, Any]],
+    middle_rows: list[dict[str, Any]],
+    *,
+    max_repr_stocks: int,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    일자별 `leader_status == 주도` 만 모은 dict. 대표 종목은 `max_repr_stocks` 개까지(캘린더는 1).
+    당일(`today`)은 파일보다 live major/middle_rows 가 우선한다.
+    """
+    lim = max(1, int(max_repr_stocks))
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for r in history_rows:
+        if str(r.get("leader_status") or "") != "주도":
+            continue
+        d = str(r.get("date") or "").strip()
+        if not d:
+            continue
+        raw = list(r.get("leader_top_stocks") or [])
+        norm = raw[:lim] if raw else []
+        ent = {
+            "group_type": str(r.get("group_type") or ""),
+            "display_path": _history_display_path_from_row(r),
+            "theme_rs": float(r.get("theme_rs") or 0.0),
+            "theme_rank": int(r.get("theme_rank") or 0),
+            "leader_top_stocks": norm,
+        }
+        by_date.setdefault(d, []).append(ent)
+    for d_key in by_date:
+        by_date[d_key].sort(key=lambda x: (-float(x.get("theme_rs") or 0.0), str(x.get("display_path") or "")))
+
+    today_list: list[dict[str, Any]] = []
+    for row in major_rows + middle_rows:
+        a = dict(row.get("analysis") or {})
+        if a.get("leader_status") != "주도":
+            continue
+        stocks: list[dict[str, Any]] = []
+        for m in (row.get("major_stocks") or [])[:lim]:
+            sym = _norm_kis_stock_symbol(m.get("symbol", ""))
+            if sym:
+                stocks.append({"symbol": sym, "name": str(m.get("name") or "").strip(), "rs": m.get("rs")})
+        today_list.append(
+            {
+                "group_type": str(row.get("group_type") or ""),
+                "display_path": str(row.get("display_path") or "").strip()
+                or _history_display_path_from_row(
+                    {
+                        "major_category": row.get("major_category"),
+                        "middle_category": row.get("middle_category"),
+                        "group_type": row.get("group_type"),
+                    }
+                ),
+                "theme_rs": float(a.get("relative_strength_score") or 0.0),
+                "theme_rank": int(a.get("relative_strength_rank") or 0),
+                "leader_top_stocks": stocks,
+            }
+        )
+    today_list.sort(key=lambda x: (-float(x.get("theme_rs") or 0.0), str(x.get("display_path") or "")))
+    by_date[str(today).strip()] = today_list
+    return by_date
+
+
+def _leader_history_sections_from_by_date(
+    by_date: dict[str, list[dict[str, Any]]],
+    today: str,
+    max_days: int,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    dates_sorted = sorted(by_date.keys(), reverse=True)
+    out: list[tuple[str, list[dict[str, Any]]]] = []
+    for d in dates_sorted:
+        rows_d = by_date[d]
+        if not rows_d and d != str(today).strip():
+            continue
+        out.append((d, rows_d))
+        if len(out) >= max(1, int(max_days)):
+            break
+    return out
+
+
+def _build_theme_daily_leader_history_sections(
+    history_rows: list[dict[str, Any]],
+    today: str,
+    major_rows: list[dict[str, Any]],
+    middle_rows: list[dict[str, Any]],
+    *,
+    top_n: int,
+    max_days: int,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """히스토리 패널용: 주도 테마 + 대표 종목은 항상 1개만 사용한다. ``top_n`` 은 호환용으로 유지."""
+    _ = top_n
+    by_date = _full_leader_history_by_date(
+        history_rows, today, major_rows, middle_rows, max_repr_stocks=1
+    )
+    return _leader_history_sections_from_by_date(by_date, today, max_days)
+
+
+def _parse_calendar_anchor_date(anchor: str) -> _dt.date | None:
+    st = str(anchor or "").strip()
+    if len(st) < 10 or st[4] != "-" or st[7] != "-":
+        return None
+    try:
+        return _dt.date(int(st[:4]), int(st[5:7]), int(st[8:10]))
+    except Exception:
+        return None
+
+
+def _month_bounds(y: int, m: int) -> tuple[_dt.date, _dt.date]:
+    first = _dt.date(y, m, 1)
+    if m == 12:
+        last = _dt.date(y, 12, 31)
+    else:
+        last = _dt.date(y, m + 1, 1) - _dt.timedelta(days=1)
+    return first, last
+
+
+def _iter_month_calendar_cells(month_first: _dt.date, month_last: _dt.date) -> list[_dt.date]:
+    wd0 = month_first.weekday()
+    start = month_first - _dt.timedelta(days=wd0)
+    wd1 = month_last.weekday()
+    end = month_last + _dt.timedelta(days=6 - wd1)
+    out: list[_dt.date] = []
+    cur = start
+    while cur <= end:
+        out.append(cur)
+        cur += _dt.timedelta(days=1)
+    return out
+
+
+def _render_theme_history_calendar_html(
+    by_date: dict[str, list[dict[str, Any]]],
+    anchor: str,
+    *,
+    max_lines_per_cell: int = 5,
+) -> str:
+    ad = _parse_calendar_anchor_date(anchor)
+    if not ad:
+        return ""
+    y, m = ad.year, ad.month
+    month_first, month_last = _month_bounds(y, m)
+    title = f"{y}년 {m}월 — 주도테마 · 대표 1종목"
+    dows = ("월", "화", "수", "목", "금", "토", "일")
+    parts: list[str] = [
+        f"<div class=\"cal-wrap\"><div class=\"cal-title\">{_escape_html(title)}</div>",
+        "<div class=\"cal-grid\">",
+    ]
+    for w in dows:
+        parts.append(f"<div class=\"cal-dow\">{_escape_html(w)}</div>")
+    today_key = str(anchor).strip()[:10]
+    for cell_d in _iter_month_calendar_cells(month_first, month_last):
+        key = cell_d.isoformat()
+        in_month = cell_d.month == m
+        cls = "cal-cell"
+        if not in_month:
+            cls += " other"
+        if key == today_key:
+            cls += " today"
+        if cell_d.weekday() >= 5:
+            cls += " weekend"
+        parts.append(f"<div class=\"{cls}\"><div class=\"cal-daynum\">{cell_d.day}</div>")
+        if in_month:
+            ents = by_date.get(key, [])
+            if ents:
+                parts.append('<div class="cal-lines">')
+                for e in ents[: max(1, int(max_lines_per_cell))]:
+                    path = str(e.get("display_path") or "-")
+                    path_d = path if len(path) <= 18 else path[:16] + "…"
+                    stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
+                    if stk:
+                        nm = _escape_html(str(stk.get("name") or stk.get("symbol") or "-"))
+                        sym = _escape_html(str(stk.get("symbol") or ""))
+                        line = f"{_escape_html(path_d)} · {nm} <code>({sym})</code>"
+                    else:
+                        line = _escape_html(path_d)
+                    parts.append(f'<div class="cal-line">{line}</div>')
+                if len(ents) > int(max_lines_per_cell):
+                    parts.append(f'<div class="cal-more">+{len(ents) - int(max_lines_per_cell)} 테마</div>')
+                parts.append("</div>")
+        parts.append("</div>")
+    parts.append("</div></div>")
+    return "".join(parts)
+
+
+def _render_theme_history_calendar_md(by_date: dict[str, list[dict[str, Any]]], anchor: str) -> list[str]:
+    ad = _parse_calendar_anchor_date(anchor)
+    if not ad:
+        return []
+    y, m = ad.year, ad.month
+    month_first, month_last = _month_bounds(y, m)
+    lines: list[str] = [
+        f"### 주도테마 캘린더 ({y}년 {m}월, 테마당 대표 1종목)",
+        "",
+    ]
+    cur = month_first
+    while cur <= month_last:
+        key = cur.isoformat()
+        ents = by_date.get(key, [])
+        if ents:
+            lines.append(f"- **{cur.month}/{cur.day}**")
+            for e in ents:
+                path = str(e.get("display_path") or "-")
+                stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
+                if stk:
+                    nm = str(stk.get("name") or stk.get("symbol") or "-")
+                    sym = str(stk.get("symbol") or "")
+                    lines.append(f"  - {path} — {nm} (`{sym}`)")
+                else:
+                    lines.append(f"  - {path}")
+        cur += _dt.timedelta(days=1)
+    lines.append("")
+    return lines
+
+
+def _format_history_stock_cell_html(stocks: list[dict[str, Any]]) -> str:
+    s = _first_leader_stock(stocks)
+    if not s:
+        return "—"
+    nm = _escape_html(str(s.get("name") or s.get("symbol") or "-"))
+    sym = _escape_html(str(s.get("symbol") or ""))
+    rs = s.get("rs")
+    rs_s = f"{float(rs):.1f}" if rs is not None else "-"
+    return f"{nm} <code>({sym})</code> RS{rs_s}"
+
+
+def _render_theme_history_section_html(
+    sections: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    history_by_date: dict[str, list[dict[str, Any]]] | None = None,
+    history_calendar_anchor: str = "",
+) -> str:
+    by_date = history_by_date if history_by_date is not None else dict(sections)
+    cal_html = (
+        _render_theme_history_calendar_html(by_date, history_calendar_anchor)
+        if history_calendar_anchor
+        else ""
+    )
+    if not sections and not any(by_date.values()):
+        return (
+            "<details class=\"section fold\" open><summary class=\"section-title\">주도테마 캘린더·히스토리</summary>"
+            "<div class=\"leaderboard\"><p class=\"lb-footnote\">표시할 히스토리가 없습니다. "
+            "<code>data/theme_history/theme_snapshot_YYYYMMDD.json</code> 이 쌓이면 날짜별로 나타납니다.</p></div></details>"
+        )
+    parts: list[str] = [
+        "<details class=\"section fold\" open><summary class=\"section-title\">주도테마 캘린더·히스토리</summary>",
+        "<div class=\"leaderboard\">",
+        "<p class=\"lb-footnote\">월 캘린더: <strong>주도</strong> 테마만, 테마당 <strong>대표 종목 1개</strong>만 표시합니다. "
+        "오늘 칸은 방금 생성한 리포트 기준입니다.</p>",
+    ]
+    if cal_html:
+        parts.append(cal_html)
+    parts.append("<p class=\"lb-footnote\">아래는 일자별 상세(동일하게 대표 1종목).</p>")
+    for i, (d, ents) in enumerate(sections):
+        n = len(ents)
+        open_attr = " open" if i == 0 else ""
+        parts.append(
+            f"<details class=\"section fold hist-day\"{open_attr}><summary class=\"section-title\">"
+            f"{_escape_html(d)} — 주도 테마 {n}개</summary><div style=\"padding:12px 4px 8px\">"
+        )
+        if not ents:
+            parts.append("<p class=\"lb-footnote\">해당일 주도 테마 없음.</p>")
+        else:
+            parts.append(
+                "<table class=\"leaderboard-table\"><thead><tr>"
+                "<th>구분</th><th>테마(경로)</th><th>RS</th><th>순위</th><th>대표 종목(1)</th>"
+                "</tr></thead><tbody>"
+            )
+            for e in ents:
+                gt_raw = str(e.get("group_type") or "")
+                gt = "대분류" if gt_raw == "major" else "중분류" if gt_raw == "middle" else gt_raw or "-"
+                parts.append(
+                    f"<tr><td>{_escape_html(gt)}</td><td>{_escape_html(str(e.get('display_path') or '-'))}</td>"
+                    f"<td>{float(e.get('theme_rs') or 0.0):.1f}</td><td>#{int(e.get('theme_rank') or 0)}</td>"
+                    f"<td style=\"text-align:left\">{_format_history_stock_cell_html(list(e.get('leader_top_stocks') or []))}</td></tr>"
+                )
+            parts.append("</tbody></table>")
+        parts.append("</div></details>")
+    parts.append("</div></details>")
+    return "".join(parts)
+
+
+def _render_theme_history_section_md(
+    sections: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    history_by_date: dict[str, list[dict[str, Any]]] | None = None,
+    history_calendar_anchor: str = "",
+) -> list[str]:
+    by_date = history_by_date if history_by_date is not None else dict(sections)
+    lines: list[str] = [
+        "",
+        "## 주도테마 캘린더·히스토리",
+        "",
+    ]
+    if not sections and not any(by_date.values()):
+        lines.append("> 표시할 히스토리가 없습니다. `data/theme_history/theme_snapshot_*.json` 이 쌓이면 날짜별로 나타납니다.")
+        lines.append("")
+        return lines
+    lines.extend(_render_theme_history_calendar_md(by_date, history_calendar_anchor))
+    lines.append("#### 일자별 상세 (대표 1종목)")
+    lines.append("")
+    for d, ents in sections:
+        lines.append(f"##### {d} — 주도 테마 {len(ents)}개")
+        lines.append("")
+        if not ents:
+            lines.append("*해당일 주도 테마 없음.*")
+            lines.append("")
+            continue
+        lines.append("| 구분 | 테마(경로) | RS | 순위 | 대표 종목(1) |")
+        lines.append("| --- | --- | ---: | ---: | --- |")
+        for e in ents:
+            gt_raw = str(e.get("group_type") or "")
+            gt = "대분류" if gt_raw == "major" else "중분류" if gt_raw == "middle" else gt_raw or "-"
+            s = _first_leader_stock(list(e.get("leader_top_stocks") or []))
+            if s:
+                nm = str(s.get("name") or s.get("symbol") or "-")
+                sym = str(s.get("symbol") or "")
+                rs = s.get("rs")
+                rs_s = f"{float(rs):.1f}" if rs is not None else "-"
+                stk_cell = f"{nm} (`{sym}`) RS{rs_s}"
+            else:
+                stk_cell = "—"
+            lines.append(
+                f"| {gt} | {e.get('display_path') or '-'} | {float(e.get('theme_rs') or 0.0):.1f} | "
+                f"#{int(e.get('theme_rank') or 0)} | {stk_cell} |"
+            )
+        lines.append("")
+    return lines
+
+
 def _silver_parquet_paths() -> list[str]:
     # reuse project default: data/lake/silver/ohlcv_daily/**/data.parquet
     root = Path(__file__).resolve().parent.parent
@@ -1288,7 +1639,11 @@ def _render_theme_summary_md(
     major_rows: list[dict[str, Any]],
     middle_rows: list[dict[str, Any]],
     top_n: int = 5,
+    history_sections: list[tuple[str, list[dict[str, Any]]]] | None = None,
+    history_by_date: dict[str, list[dict[str, Any]]] | None = None,
+    history_calendar_anchor: str = "",
 ) -> str:
+    hist = history_sections if history_sections is not None else []
     lines = [
         "# Theme Major/Middle Sector Overview",
         "",
@@ -1303,10 +1658,21 @@ def _render_theme_summary_md(
             else ""
         ),
         "",
-        "<details open>",
-        "<summary>대분류 Leaderboard</summary>",
-        "",
     ]
+    lines.extend(
+        _render_theme_history_section_md(
+            hist,
+            history_by_date=history_by_date,
+            history_calendar_anchor=history_calendar_anchor,
+        )
+    )
+    lines.extend(
+        [
+            "<details open>",
+            "<summary>대분류 Leaderboard</summary>",
+            "",
+        ]
+    )
     lines.extend(
         _render_leaderboard_md(
             major_rows,
@@ -1595,8 +1961,12 @@ def _render_theme_report_html(
     major_rows: list[dict[str, Any]],
     middle_rows: list[dict[str, Any]],
     top_n: int,
+    history_sections: list[tuple[str, list[dict[str, Any]]]] | None = None,
+    history_by_date: dict[str, list[dict[str, Any]]] | None = None,
+    history_calendar_anchor: str = "",
 ) -> str:
     leader_count = sum(1 for row in major_rows + middle_rows if dict(row.get("analysis") or {}).get("leader_status") == "주도")
+    hist = history_sections if history_sections is not None else []
     return (
         "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         "<title>Theme Major/Middle Sector Overview</title>"
@@ -1624,6 +1994,18 @@ def _render_theme_report_html(
         ".pos{color:#d92d20;font-weight:700;}.neg{color:#0969da;font-weight:700;}.neutral{color:#667085;font-weight:600;}"
         "table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;margin-top:14px;overflow:hidden;border:1px solid var(--line);border-radius:16px;}th,td{padding:10px 10px;border-top:1px solid var(--line);text-align:right;background:#fff;}thead th{background:#f8fafc;border-top:none;color:#334155;font-weight:700;}tbody tr:nth-child(even) td{background:#fbfdff;}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left;}.leaderboard-table th,.leaderboard-table td{text-align:left;}.leaderboard-table th:nth-child(3),.leaderboard-table td:nth-child(3),.leaderboard-table th:nth-child(4),.leaderboard-table td:nth-child(4),.leaderboard-table th:nth-child(5),.leaderboard-table td:nth-child(5),.leaderboard-table th:nth-child(6),.leaderboard-table td:nth-child(6),.leaderboard-table th:nth-child(7),.leaderboard-table td:nth-child(7){text-align:right;}"
         "a{color:#1d4ed8;text-decoration:none;}a:hover{text-decoration:underline;}@media (max-width:720px){.wrap{padding:18px 14px 36px;}.hero{padding:22px 20px;}.card-head{flex-direction:column;}.rs-box{text-align:left;}}"
+        ".cal-wrap{margin-top:14px;background:#fff;border-radius:18px;padding:16px 14px 18px;border:1px solid rgba(15,23,42,.06);}"
+        ".cal-title{font-size:15px;font-weight:700;margin:0 0 12px;color:#0f172a;}"
+        ".cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;font-size:11px;}"
+        ".cal-dow{text-align:center;color:var(--muted);font-weight:600;padding:6px 2px;font-size:11px;}"
+        ".cal-cell{min-height:92px;border:1px solid var(--line);border-radius:12px;padding:6px 5px;background:#fbfdff;}"
+        ".cal-cell.other{opacity:.42;background:#f4f6f9;}"
+        ".cal-cell.today{outline:2px solid #2563eb;outline-offset:-1px;}"
+        ".cal-cell.weekend .cal-daynum{color:#64748b;}"
+        ".cal-daynum{font-weight:700;color:#0f172a;font-size:12px;}"
+        ".cal-lines{margin-top:5px;color:#334155;line-height:1.35;}"
+        ".cal-line{word-break:break-word;margin-top:3px;}"
+        ".cal-more{margin-top:4px;font-size:10px;color:var(--muted);}"
         "</style></head><body><div class=\"wrap\">"
         "<section class=\"hero\">"
         "<h1>Theme Major/Middle Sector Overview</h1>"
@@ -1638,6 +2020,7 @@ def _render_theme_report_html(
         f"<div class=\"hero-stat\"><div class=\"label\">주도 그룹</div><div class=\"value\">{leader_count}</div></div>"
         f"<div class=\"hero-stat\"><div class=\"label\">분류 스키마</div><div class=\"value\">{_escape_html(meta.get('schema_version', '-'))}</div></div>"
         "</div></section>"
+        f"{_render_theme_history_section_html(hist, history_by_date=history_by_date, history_calendar_anchor=history_calendar_anchor)}"
         f"{_render_leaderboard_html(major_rows, title='대분류 Leaderboard', top_n=top_n, open_by_default=True, footnote='그룹 점수는 다른 대분류와만 비교. 종목 RS·백분위·대표는 해당 대분류(하위 전체, 종목 중복 제거) 구성만 기준.')}"
         f"{_render_leaderboard_html_v2(major_rows, title='대분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%).')}"
         f"{_render_leaderboard_html(middle_rows, title='중분류 Leaderboard', top_n=top_n, open_by_default=False, footnote='그룹 점수는 다른 중분류와만 비교(대분류 랭킹과 별도). 종목 RS·백분위·대표는 그 중분류에만 싣은 구성으로만. 표본이 적은 중분류는 지표가 요동칠 수 있음.')}"
@@ -1675,6 +2058,12 @@ def main() -> None:
     )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Output directory.")
     parser.add_argument("--theme-history-dir", type=Path, default=DEFAULT_THEME_HISTORY_DIR, help="Theme snapshot history directory.")
+    parser.add_argument(
+        "--history-report-days",
+        type=int,
+        default=14,
+        help="How many recent calendar days to show in overview.html/md 일별 주도 테마 히스토리 패널.",
+    )
     parser.add_argument("--top-n", type=int, default=5, help="Top stocks per group.")
     parser.add_argument(
         "--no-quote-enrichment",
@@ -1994,12 +2383,29 @@ def main() -> None:
     snapshot_rows: list[dict[str, Any]] = []
     for row in major_rows + middle_rows:
         a = dict(row.get("analysis") or {})
+        disp = str(row.get("display_path") or "").strip()
+        top_stocks: list[dict[str, Any]] = []
+        if str(a.get("leader_status") or "") == "주도":
+            for m in (row.get("major_stocks") or [])[:1]:
+                sym = _norm_kis_stock_symbol(m.get("symbol", ""))
+                if not sym:
+                    continue
+                top_stocks.append(
+                    {"symbol": sym, "name": str(m.get("name") or "").strip(), "rs": m.get("rs")}
+                )
         snapshot_rows.append(
             {
                 "date": today_yyyy_mm_dd,
                 "group_type": str(row.get("group_type") or ""),
                 "major_category": row.get("major_category"),
                 "middle_category": row.get("middle_category"),
+                "display_path": disp or _history_display_path_from_row(
+                    {
+                        "major_category": row.get("major_category"),
+                        "middle_category": row.get("middle_category"),
+                        "group_type": row.get("group_type"),
+                    }
+                ),
                 "theme_rs": float(a.get("relative_strength_score") or 0.0),
                 "theme_rank": int(a.get("relative_strength_rank") or 0),
                 "member_count": int(a.get("member_count") or 0),
@@ -2009,6 +2415,7 @@ def main() -> None:
                 "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
                 "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
                 "leader_status": str(a.get("leader_status") or ""),
+                "leader_top_stocks": top_stocks,
             }
         )
     try:
@@ -2034,8 +2441,22 @@ def main() -> None:
         "collected_at": collected_at,
         "theme_history_dir": str(history_dir),
         "theme_snapshot_date": today_yyyy_mm_dd,
+        "theme_history_report_days": max(1, int(args.history_report_days)),
         "market_up_ratio": _round1((market_up_ratio or 0.0) * 100.0) if market_up_ratio is not None else None,
     }
+
+    history_by_date = _full_leader_history_by_date(
+        history_rows,
+        today_yyyy_mm_dd,
+        major_rows,
+        middle_rows,
+        max_repr_stocks=1,
+    )
+    history_sections = _leader_history_sections_from_by_date(
+        history_by_date,
+        today_yyyy_mm_dd,
+        max(1, int(args.history_report_days)),
+    )
 
     payload = {
         "metadata": meta,
@@ -2054,6 +2475,9 @@ def main() -> None:
             major_rows=major_rows,
             middle_rows=middle_rows,
             top_n=max(1, int(args.top_n)),
+            history_sections=history_sections,
+            history_by_date=history_by_date,
+            history_calendar_anchor=today_yyyy_mm_dd,
         ),
         encoding="utf-8",
     )
@@ -2065,6 +2489,9 @@ def main() -> None:
             major_rows=major_rows,
             middle_rows=middle_rows,
             top_n=max(1, int(args.top_n)),
+            history_sections=history_sections,
+            history_by_date=history_by_date,
+            history_calendar_anchor=today_yyyy_mm_dd,
         ),
         encoding="utf-8",
     )
