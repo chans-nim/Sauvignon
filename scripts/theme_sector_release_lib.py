@@ -6,6 +6,7 @@ import re
 
 THEME_SECTOR_TAG_PREFIX = "theme-sector-"
 LEGACY_THEMA_SECTOR_TAG_PREFIX = "thema-sector-"
+THEME_HISTORY_SNAPSHOT_ASSET = "theme_history_snapshot.json"
 
 THEME_SECTOR_TAG_RE = re.compile(r"^theme-sector-(\d{8})-(\d{4})$")
 LEGACY_THEMA_SECTOR_TAG_RE = re.compile(r"^thema-sector-(\d{8})-(\d{4})$")

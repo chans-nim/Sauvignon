@@ -1,5 +1,5 @@
 # Theme(테마) 대/중분류 섹터 리포트: 평일 KST 16:00 (UTC 07:00) + 수동 실행
-# - 이전 theme-sector-* (및 구 thema-sector-*) 릴리즈의 theme_snapshot 을 받아 히스토리를 채운 뒤 수집한다.
+# - collect_thema_sector_data 가 기본으로 GitHub theme-sector-* 릴리즈에서 theme_history 를 동기화한 뒤 수집한다.
 # - 수집 후 theme-sector- 태그로 릴리즈한다.
 name: Collect theme sector data
 
@@ -34,15 +34,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-
-      - name: Restore theme history from releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python -m scripts.sync_theme_history_from_github_releases \
-            --repo "${{ github.repository }}" \
-            --dest-dir data/theme_history \
-            --max-releases 60
 
       - name: Collect theme sector data
         env:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,8 +12,13 @@ from scripts.collect_thema_sector_data import (
     _all_unique_stock_symbols_from_groups,
     _build_group_blueprints,
     _build_rows,
+    _build_theme_metric_history_rows,
+    _build_theme_history_snapshot_rows,
+    _combine_theme_history_dirs,
     _build_theme_daily_leader_history_sections,
+    _load_theme_history_rows,
     _render_theme_history_calendar_html,
+    _theme_history_local_summary,
     classify_theme_quality,
     calculate_breadth_score,
     calculate_persistence_score,
@@ -193,6 +199,358 @@ def test_theme_history_calendar_shows_one_stock_per_theme() -> None:
     html = _render_theme_history_calendar_html(by_date, "2026-05-10")
     assert "SK" in html and "000660" in html
     assert "005930" not in html
+
+
+def test_theme_history_local_summary_counts_snapshot_files(tmp_path) -> None:
+    (tmp_path / "theme_snapshot_20260510.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "theme_snapshot_20260511.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "other.txt").write_text("x", encoding="utf-8")
+    s = _theme_history_local_summary(tmp_path)
+    assert s["file_count"] == 2
+    assert s["distinct_file_dates"] == 2
+    assert s["min_file_date"] == "2026-05-10"
+    assert s["max_file_date"] == "2026-05-11"
+
+
+def test_load_theme_history_rows_keeps_only_leaders_and_one_stock(tmp_path) -> None:
+    payload = {
+        "date": "2026-05-12",
+        "rows": [
+            {
+                "date": "2026-05-12",
+                "group_type": "middle",
+                "major_category": "반도체",
+                "middle_category": "메모리",
+                "leader_status": "주도",
+                "theme_rs": 90.0,
+                "theme_rank": 1,
+                "leader_top_stocks": [
+                    {"symbol": "000660", "name": "SK하이닉스", "rs": 95.0},
+                    {"symbol": "005930", "name": "삼성전자", "rs": 90.0},
+                ],
+            },
+            {
+                "date": "2026-05-12",
+                "group_type": "middle",
+                "major_category": "2차전지",
+                "middle_category": "셀",
+                "leader_status": "관심",
+                "theme_rs": 70.0,
+                "theme_rank": 2,
+                "leader_top_stocks": [{"symbol": "373220", "name": "LG에너지솔루션", "rs": 80.0}],
+            },
+        ],
+    }
+    (tmp_path / "theme_snapshot_20260512.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    rows = _load_theme_history_rows(tmp_path, leaders_only=True)
+
+    assert len(rows) == 1
+    assert rows[0]["leader_status"] == "주도"
+    assert rows[0]["display_path"] == "반도체 > 메모리"
+    assert rows[0]["leader_top_stocks"] == [{"symbol": "000660", "name": "SK하이닉스", "rs": 95.0}]
+
+
+def test_load_theme_history_rows_default_keeps_metric_rows_for_v2(tmp_path) -> None:
+    payload = {
+        "date": "2026-05-12",
+        "rows": [
+            {
+                "date": "2026-05-12",
+                "group_type": "major",
+                "major_category": "기계",
+                "leader_status": "주도",
+                "theme_rs": 80.0,
+                "theme_rank": 1,
+                "leader_top_stocks": [{"symbol": "090710", "name": "휴림로봇", "rs": 82.8}],
+            }
+        ],
+        "metric_rows": [
+            {
+                "date": "2026-05-12",
+                "group_type": "major",
+                "major_category": "기계",
+                "leader_status": "관심",
+                "theme_rs": 60.1,
+                "theme_rank": 1,
+            },
+            {
+                "date": "2026-05-12",
+                "group_type": "major",
+                "major_category": "자동차",
+                "leader_status": "중립",
+                "theme_rs": 59.3,
+                "theme_rank": 2,
+            },
+        ],
+    }
+    (tmp_path / "theme_history_snapshot.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    metric_rows = _load_theme_history_rows(tmp_path)
+    leader_rows = _load_theme_history_rows(tmp_path, leaders_only=True)
+
+    assert len(metric_rows) == 2
+    assert {r["display_path"] for r in metric_rows} == {"기계", "자동차"}
+    assert len(leader_rows) == 1
+    assert leader_rows[0]["display_path"] == "기계"
+
+
+def test_combine_theme_history_dirs_lets_release_override_local(tmp_path) -> None:
+    local_dir = tmp_path / "local"
+    release_dir = tmp_path / "release"
+    dest_dir = tmp_path / "dest"
+    local_dir.mkdir()
+    release_dir.mkdir()
+
+    (local_dir / "theme_history_snapshot.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-05-11",
+                "rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "주도",
+                        "theme_rs": 80.0,
+                        "theme_rank": 1,
+                        "leader_top_stocks": [{"symbol": "123456", "name": "로컬", "rs": 80.0}],
+                    }
+                ],
+                "metric_rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "관심",
+                        "theme_rs": 80.0,
+                        "theme_rank": 1,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (release_dir / "theme_history_snapshot.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-05-11",
+                "rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "주도",
+                        "theme_rs": 90.0,
+                        "theme_rank": 1,
+                        "leader_top_stocks": [{"symbol": "123456", "name": "릴리즈", "rs": 90.0}],
+                    }
+                ],
+                "metric_rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "주도",
+                        "theme_rs": 90.0,
+                        "theme_rank": 1,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = _combine_theme_history_dirs([local_dir, release_dir], dest_dir)
+    payload = json.loads((dest_dir / "theme_history_snapshot.json").read_text(encoding="utf-8"))
+
+    assert summary["distinct_dates"] == 1
+    assert payload["rows"][0]["theme_rs"] == 90.0
+    assert payload["rows"][0]["leader_top_stocks"][0]["name"] == "릴리즈"
+    assert payload["metric_rows"][0]["leader_status"] == "주도"
+
+
+def test_combine_theme_history_dirs_preserves_local_when_release_is_short(tmp_path) -> None:
+    local_dir = tmp_path / "local"
+    release_dir = tmp_path / "release"
+    dest_dir = tmp_path / "dest"
+    local_dir.mkdir()
+    release_dir.mkdir()
+
+    (local_dir / "theme_snapshot_20260510.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-05-10",
+                "rows": [
+                    {
+                        "date": "2026-05-10",
+                        "group_type": "major",
+                        "major_category": "기계",
+                        "leader_status": "관심",
+                        "theme_rs": 60.0,
+                        "theme_rank": 2,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (release_dir / "theme_history_snapshot.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-05-11",
+                "rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "주도",
+                        "theme_rs": 90.0,
+                        "theme_rank": 1,
+                        "leader_top_stocks": [{"symbol": "123456", "name": "대표", "rs": 90.0}],
+                    }
+                ],
+                "metric_rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "주도",
+                        "theme_rs": 90.0,
+                        "theme_rank": 1,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = _combine_theme_history_dirs([local_dir, release_dir], dest_dir)
+    metric_rows = _load_theme_history_rows(dest_dir)
+    leader_rows = _load_theme_history_rows(dest_dir, leaders_only=True)
+
+    assert summary["distinct_dates"] == 2
+    assert {r["date"] for r in metric_rows} == {"2026-05-10", "2026-05-11"}
+    assert [r["date"] for r in leader_rows] == ["2026-05-11"]
+
+
+def test_build_theme_metric_history_rows_keeps_all_groups_for_v2() -> None:
+    rows = [
+        {
+            "group_type": "major",
+            "display_path": "기계",
+            "major_category": "기계",
+            "middle_category": None,
+            "analysis": {"leader_status": "관심", "relative_strength_score": 60.1, "relative_strength_rank": 1},
+        },
+        {
+            "group_type": "major",
+            "display_path": "자동차",
+            "major_category": "자동차",
+            "middle_category": None,
+            "analysis": {"leader_status": "중립", "relative_strength_score": 59.3, "relative_strength_rank": 2},
+        },
+    ]
+
+    metric_rows = _build_theme_metric_history_rows(rows, [], "2026-05-12")
+
+    assert len(metric_rows) == 2
+    assert [r["leader_status"] for r in metric_rows] == ["관심", "중립"]
+
+
+def test_build_theme_history_snapshot_rows_falls_back_when_no_strict_leader() -> None:
+    rows = [
+        {
+            "group_type": "major",
+            "display_path": "기계",
+            "major_category": "기계",
+            "middle_category": None,
+            "major_stocks": [
+                {"symbol": "090710", "name": "휴림로봇", "rs": 82.8},
+                {"symbol": "319400", "name": "현대무벡스", "rs": 65.5},
+            ],
+            "analysis": {"leader_status": "관심", "relative_strength_score": 60.1, "relative_strength_rank": 1},
+        },
+        {
+            "group_type": "major",
+            "display_path": "자동차",
+            "major_category": "자동차",
+            "middle_category": None,
+            "major_stocks": [{"symbol": "005380", "name": "현대차", "rs": 70.0}],
+            "analysis": {"leader_status": "중립", "relative_strength_score": 59.3, "relative_strength_rank": 2},
+        },
+    ]
+
+    snapshot_rows = _build_theme_history_snapshot_rows(rows, [], "2026-05-12", fallback_count=1)
+
+    assert len(snapshot_rows) == 1
+    assert snapshot_rows[0]["display_path"] == "기계"
+    assert snapshot_rows[0]["leader_status"] == "주도"
+    assert snapshot_rows[0]["source_leader_status"] == "관심"
+    assert snapshot_rows[0]["leader_top_stocks"] == [{"symbol": "090710", "name": "휴림로봇", "rs": 82.8}]
+
+
+def test_publish_combined_snapshot_keeps_leaders_only(tmp_path) -> None:
+    from scripts.publish_theme_sector_release import write_combined_snapshot
+
+    (tmp_path / "theme_snapshot_20260511.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-05-11",
+                "rows": [
+                    {
+                        "date": "2026-05-11",
+                        "group_type": "major",
+                        "major_category": "로봇",
+                        "leader_status": "주도",
+                        "theme_rs": 88.0,
+                        "theme_rank": 1,
+                        "leader_top_stocks": [
+                            {"symbol": "123456", "name": "대표", "rs": 91.0},
+                            {"symbol": "654321", "name": "차순위", "rs": 82.0},
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "theme_snapshot_20260512.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-05-12",
+                "rows": [
+                    {
+                        "date": "2026-05-12",
+                        "group_type": "major",
+                        "major_category": "중립테마",
+                        "leader_status": "중립",
+                        "theme_rs": 55.0,
+                        "theme_rank": 3,
+                        "leader_top_stocks": [{"symbol": "111111", "name": "제외", "rs": 70.0}],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    out_path = tmp_path / "theme_history_snapshot.json"
+
+    write_combined_snapshot(tmp_path, "2026-05-12", out_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert payload["schema_version"] == 2
+    assert payload["date"] == "2026-05-12"
+    assert len(payload["rows"]) == 1
+    assert payload["rows"][0]["leader_status"] == "주도"
+    assert payload["rows"][0]["leader_top_stocks"] == [{"symbol": "123456", "name": "대표", "rs": 91.0}]
+    assert len(payload["metric_rows"]) == 2
 
 
 def test_resolve_classification_json_falls_back_to_repo_path(monkeypatch, tmp_path) -> None:

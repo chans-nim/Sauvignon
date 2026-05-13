@@ -9,6 +9,9 @@ Theme(테마) 대분류/중분류 기반 섹터 리포트 생성기.
   python -m scripts.collect_thema_sector_data --no-quote-enrichment
   python -m scripts.collect_thema_sector_data --full-quote-enrichment
   python -m scripts.collect_thema_sector_data --mode real --telegram
+  python -m scripts.collect_thema_sector_data --no-sync-theme-history   # GitHub 히스토리 동기화 생략(오프라인 등)
+
+기본 실행 시 **GitHub `theme-sector-*` 릴리즈**에서 `data/theme_history/` 로 통합/일별 테마 히스토리 스냅샷을 먼저 동기화한다( CI 와 동일).
 
 기본은 **2단계**다. (1) 분류 **전 구성주**에 KIS **현재가(등락·거래대금)** 만 병렬 조회한 뒤, 라이브 랭킹·순위 수급·JSON 시총과 합쳐 **전 그룹을 탐색**해 섹터(대/중분류)마다 RS 상위 **top N**(기본 5)을 뽑고,
 (2) 그 **선정 종목**에만 **프로그램**(및 순위에 없을 때 종목별 수급)까지 포함한 보강을 추가 호출한다(선정 종목 시세는 재조회될 수 있음).
@@ -28,6 +31,7 @@ import json
 import math
 import os
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -50,6 +54,7 @@ from scripts.collect_sector_data import (
     _send_telegram_message,
     _telegram_ssl_status_line,
 )
+from scripts.theme_sector_release_lib import THEME_HISTORY_SNAPSHOT_ASSET
 
 
 def _fmt_signed_eok(x: Any) -> str:
@@ -69,6 +74,10 @@ _LEGACY_CLASSIFICATION_BASENAME = "thema_major_middle_stock_classification_dup_a
 DEFAULT_CLASSIFICATION_JSON = Path.home() / "Downloads" / _CLASSIFICATION_BASENAME
 DEFAULT_OUTPUT_DIR = Path("data/lake/sector/thema_major_middle")
 DEFAULT_THEME_HISTORY_DIR = Path("data/theme_history")
+# `_load_theme_history_rows` 가 읽는 최근 날짜 상한 (sync `--max-releases` 와 맞추면 혼동이 줄어듦)
+THEME_HISTORY_LOAD_MAX_FILES = 40
+THEME_HISTORY_FALLBACK_LEADER_COUNT = 3
+THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK = 5
 
 # `relative_strength_score` = 주도·실시간 기준(등락·거래대금) 비중이 크도록, RS(합성)는 보조. 합 1.0, 코호트=동일 대/중 그룹끼리
 GROUP_SCORE_W_REP_RETURN_COHORT = 0.26  # 대표(top_n) 평균 등락 백분위
@@ -316,41 +325,358 @@ def _theme_history_snapshot_path(history_dir: Path, date_yyyy_mm_dd: str) -> Pat
     return Path(history_dir) / f"theme_snapshot_{_date_yyyymmdd(date_yyyy_mm_dd)}.json"
 
 
-def _load_theme_history_rows(history_dir: Path, *, max_days: int = 30) -> list[dict[str, Any]]:
+def _theme_history_combined_snapshot_path(history_dir: Path) -> Path:
+    return Path(history_dir) / THEME_HISTORY_SNAPSHOT_ASSET
+
+
+def _normalize_leader_history_row(r: dict[str, Any]) -> dict[str, Any] | None:
+    if str(r.get("leader_status") or "").strip() != "주도":
+        return None
+    d = str(r.get("date") or "").strip()
+    if not d:
+        return None
+    stocks: list[dict[str, Any]] = []
+    for s in list(r.get("leader_top_stocks") or [])[:1]:
+        if not isinstance(s, dict):
+            continue
+        sym = _norm_kis_stock_symbol(s.get("symbol", ""))
+        if not sym:
+            continue
+        stocks.append({"symbol": sym, "name": str(s.get("name") or "").strip(), "rs": s.get("rs")})
+    return {
+        "date": d,
+        "group_type": str(r.get("group_type") or ""),
+        "major_category": r.get("major_category"),
+        "middle_category": r.get("middle_category"),
+        "display_path": _history_display_path_from_row(r),
+        "theme_rs": float(r.get("theme_rs") or 0.0),
+        "theme_rank": int(r.get("theme_rank") or 0),
+        "member_count": int(r.get("member_count") or 0),
+        "top_members_value_sum": float(r.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(r.get("total_value_traded") or 0.0),
+        "up_ratio": float(r.get("up_ratio") or 0.0),
+        "rs60_ratio": float(r.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(r.get("rs70_ratio") or 0.0),
+        "leader_status": "주도",
+        "leader_top_stocks": stocks,
+    }
+
+
+def _normalize_metric_history_row(r: dict[str, Any]) -> dict[str, Any] | None:
+    d = str(r.get("date") or "").strip()
+    if not d:
+        return None
+    return {
+        "date": d,
+        "group_type": str(r.get("group_type") or ""),
+        "major_category": r.get("major_category"),
+        "middle_category": r.get("middle_category"),
+        "display_path": _history_display_path_from_row(r),
+        "theme_rs": float(r.get("theme_rs") or 0.0),
+        "theme_rank": int(r.get("theme_rank") or 0),
+        "member_count": int(r.get("member_count") or 0),
+        "top_members_value_sum": float(r.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(r.get("total_value_traded") or 0.0),
+        "up_ratio": float(r.get("up_ratio") or 0.0),
+        "rs60_ratio": float(r.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(r.get("rs70_ratio") or 0.0),
+        "leader_status": str(r.get("leader_status") or ""),
+    }
+
+
+def _read_theme_history_snapshot_rows(path: Path, *, leaders_only: bool = False) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if isinstance(payload, dict):
+        raw_rows = payload.get("rows") if leaders_only else payload.get("metric_rows") or payload.get("rows")
+    else:
+        raw_rows = payload
+    if not isinstance(raw_rows, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for r in raw_rows:
+        if not isinstance(r, dict):
+            continue
+        nr = _normalize_leader_history_row(r) if leaders_only else _normalize_metric_history_row(r)
+        if nr is not None:
+            rows.append(nr)
+    return rows
+
+
+def _theme_history_source_files(history_dir: Path) -> list[Path]:
+    hd = Path(history_dir)
+    combined = _theme_history_combined_snapshot_path(hd)
+    if combined.is_file():
+        return [combined]
+    return sorted(hd.glob("theme_snapshot_*.json"), key=lambda p: p.name)
+
+
+def _theme_history_row_key(r: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(r.get("date") or ""),
+        str(r.get("group_type") or ""),
+        str(r.get("major_category") or ""),
+        str(r.get("middle_category") or ""),
+        str(r.get("display_path") or ""),
+    )
+
+
+def _limit_history_rows_to_recent_dates(rows: list[dict[str, Any]], max_days: int) -> list[dict[str, Any]]:
+    if max_days <= 0:
+        return rows
+    dates = sorted({str(r.get("date") or "") for r in rows if r.get("date")}, reverse=True)
+    keep_dates = set(dates[: int(max_days)])
+    return [r for r in rows if str(r.get("date") or "") in keep_dates]
+
+
+def _load_theme_history_rows(history_dir: Path, *, max_days: int = 30, leaders_only: bool = False) -> list[dict[str, Any]]:
     """
-    data/theme_history/theme_snapshot_YYYYMMDD.json 을 여러 개 읽어 단일 row list로 평탄화.
+    통합 스냅샷(`theme_history_snapshot.json`)과 구 일별 스냅샷을 읽어 단일 row list로 평탄화한다.
+    ThemeScoreV2 용도는 전체 metric rows를 읽고, 캘린더 용도는 leaders_only=True 로 주도 테마만 읽는다.
     """
     hd = Path(history_dir)
     if not hd.exists():
         return []
-    files = sorted(hd.glob("theme_snapshot_*.json"), key=lambda p: p.name, reverse=True)
-    rows: list[dict[str, Any]] = []
-    for p in files[: max(0, int(max_days))]:
-        try:
-            payload = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
-            for r in payload["rows"]:
-                if isinstance(r, dict):
-                    rows.append(r)
-        elif isinstance(payload, list):
-            for r in payload:
-                if isinstance(r, dict):
-                    rows.append(r)
+    files = _theme_history_source_files(hd)
+    by_key: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for p in files:
+        for r in _read_theme_history_snapshot_rows(p, leaders_only=leaders_only):
+            by_key[_theme_history_row_key(r)] = r
+    rows = list(by_key.values())
+    rows = _limit_history_rows_to_recent_dates(rows, max_days)
+    rows.sort(
+        key=lambda r: (
+            str(r.get("date") or ""),
+            str(r.get("group_type") or ""),
+            str(r.get("display_path") or ""),
+        ),
+        reverse=True,
+    )
     return rows
 
 
-def _write_theme_history_snapshot(history_dir: Path, *, date_yyyy_mm_dd: str, rows: list[dict[str, Any]]) -> Path:
+def _theme_history_local_summary(history_dir: Path) -> dict[str, Any]:
+    """통합/일별 테마 히스토리 파일 개수와 포함 날짜 범위."""
+    hd = Path(history_dir)
+    if not hd.is_dir():
+        return {
+            "file_count": 0,
+            "distinct_file_dates": 0,
+            "min_file_date": None,
+            "max_file_date": None,
+        }
+    paths = sorted(hd.glob("theme_snapshot_*.json"))
+    dates: list[str] = []
+    combined = _theme_history_combined_snapshot_path(hd)
+    if combined.is_file():
+        try:
+            payload = json.loads(combined.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            snap_date = str(payload.get("date") or "").strip()
+            if snap_date:
+                dates.append(snap_date)
+            rows = payload.get("rows")
+            if isinstance(rows, list):
+                for r in rows:
+                    if isinstance(r, dict):
+                        d = str(r.get("date") or "").strip()
+                        if d:
+                            dates.append(d)
+    for p in paths:
+        name = p.name
+        if not name.startswith("theme_snapshot_") or not name.endswith(".json"):
+            continue
+        stem = name[len("theme_snapshot_") : -len(".json")]
+        if len(stem) == 8 and stem.isdigit():
+            dates.append(f"{stem[:4]}-{stem[4:6]}-{stem[6:8]}")
+    uniq = sorted(set(dates))
+    return {
+        "file_count": len(paths) + (1 if combined.is_file() else 0),
+        "distinct_file_dates": len(uniq),
+        "min_file_date": uniq[0] if uniq else None,
+        "max_file_date": uniq[-1] if uniq else None,
+    }
+
+
+def _write_theme_history_snapshot(
+    history_dir: Path,
+    *,
+    date_yyyy_mm_dd: str,
+    rows: list[dict[str, Any]],
+    metric_rows: list[dict[str, Any]] | None = None,
+) -> Path:
     hd = Path(history_dir)
     hd.mkdir(parents=True, exist_ok=True)
     path = _theme_history_snapshot_path(hd, date_yyyy_mm_dd)
     payload = {
+        "schema_version": 2,
         "date": date_yyyy_mm_dd,
         "rows": rows,
     }
+    if metric_rows is not None:
+        payload["metric_rows"] = metric_rows
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def _theme_history_row_from_report_row(row: dict[str, Any], date_yyyy_mm_dd: str) -> dict[str, Any]:
+    a = dict(row.get("analysis") or {})
+    disp = str(row.get("display_path") or "").strip()
+    top_stocks: list[dict[str, Any]] = []
+    for m in (row.get("major_stocks") or [])[:1]:
+        sym = _norm_kis_stock_symbol(m.get("symbol", ""))
+        if not sym:
+            continue
+        top_stocks.append({"symbol": sym, "name": str(m.get("name") or "").strip(), "rs": m.get("rs")})
+    return {
+        "date": date_yyyy_mm_dd,
+        "group_type": str(row.get("group_type") or ""),
+        "major_category": row.get("major_category"),
+        "middle_category": row.get("middle_category"),
+        "display_path": disp
+        or _history_display_path_from_row(
+            {
+                "major_category": row.get("major_category"),
+                "middle_category": row.get("middle_category"),
+                "group_type": row.get("group_type"),
+            }
+        ),
+        "theme_rs": float(a.get("relative_strength_score") or 0.0),
+        "theme_rank": int(a.get("relative_strength_rank") or 0),
+        "member_count": int(a.get("member_count") or 0),
+        "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(a.get("total_value_traded") or 0.0),
+        "up_ratio": float(a.get("up_ratio") or 0.0),
+        "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
+        "leader_status": "주도",
+        "source_leader_status": str(a.get("leader_status") or ""),
+        "leader_top_stocks": top_stocks,
+    }
+
+
+def _build_theme_history_snapshot_rows(
+    major_rows: list[dict[str, Any]],
+    middle_rows: list[dict[str, Any]],
+    date_yyyy_mm_dd: str,
+    *,
+    fallback_count: int = THEME_HISTORY_FALLBACK_LEADER_COUNT,
+) -> list[dict[str, Any]]:
+    all_rows = list(major_rows) + list(middle_rows)
+    leaders = [r for r in all_rows if dict(r.get("analysis") or {}).get("leader_status") == "주도"]
+    selected = leaders
+    if not selected:
+        selected = sorted(
+            all_rows,
+            key=lambda r: (
+                -float(dict(r.get("analysis") or {}).get("relative_strength_score") or 0.0),
+                int(dict(r.get("analysis") or {}).get("relative_strength_rank") or 999999),
+                str(r.get("display_path") or ""),
+            ),
+        )[: max(1, int(fallback_count))]
+    return [_theme_history_row_from_report_row(r, date_yyyy_mm_dd) for r in selected]
+
+
+def _build_theme_metric_history_rows(
+    major_rows: list[dict[str, Any]],
+    middle_rows: list[dict[str, Any]],
+    date_yyyy_mm_dd: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in list(major_rows) + list(middle_rows):
+        a = dict(row.get("analysis") or {})
+        disp = str(row.get("display_path") or "").strip()
+        rows.append(
+            {
+                "date": date_yyyy_mm_dd,
+                "group_type": str(row.get("group_type") or ""),
+                "major_category": row.get("major_category"),
+                "middle_category": row.get("middle_category"),
+                "display_path": disp
+                or _history_display_path_from_row(
+                    {
+                        "major_category": row.get("major_category"),
+                        "middle_category": row.get("middle_category"),
+                        "group_type": row.get("group_type"),
+                    }
+                ),
+                "theme_rs": float(a.get("relative_strength_score") or 0.0),
+                "theme_rank": int(a.get("relative_strength_rank") or 0),
+                "member_count": int(a.get("member_count") or 0),
+                "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
+                "total_value_traded": float(a.get("total_value_traded") or 0.0),
+                "up_ratio": float(a.get("up_ratio") or 0.0),
+                "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
+                "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
+                "leader_status": str(a.get("leader_status") or ""),
+            }
+        )
+    return rows
+
+
+def _write_combined_theme_history_snapshot(
+    history_dir: Path,
+    *,
+    rows: list[dict[str, Any]],
+    metric_rows: list[dict[str, Any]],
+    max_days: int = THEME_HISTORY_LOAD_MAX_FILES,
+) -> Path:
+    rows = _limit_history_rows_to_recent_dates(rows, max_days)
+    metric_rows = _limit_history_rows_to_recent_dates(metric_rows, max_days)
+    all_dates = sorted(
+        {
+            str(r.get("date") or "")
+            for r in rows + metric_rows
+            if str(r.get("date") or "").strip()
+        }
+    )
+    snapshot_date = all_dates[-1] if all_dates else str(_dt.date.today().isoformat())
+    path = _theme_history_combined_snapshot_path(history_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 2,
+        "date": snapshot_date,
+        "rows": rows,
+        "metric_rows": metric_rows,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _combine_theme_history_dirs(
+    source_dirs: list[Path],
+    dest_dir: Path,
+    *,
+    max_days: int = THEME_HISTORY_LOAD_MAX_FILES,
+) -> dict[str, Any]:
+    leader_by_key: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    metric_by_key: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for source_dir in source_dirs:
+        if not Path(source_dir).exists():
+            continue
+        for r in _load_theme_history_rows(source_dir, max_days=0, leaders_only=True):
+            leader_by_key[_theme_history_row_key(r)] = r
+        for r in _load_theme_history_rows(source_dir, max_days=0, leaders_only=False):
+            metric_by_key[_theme_history_row_key(r)] = r
+
+    leader_rows = list(leader_by_key.values())
+    metric_rows = list(metric_by_key.values())
+    leader_rows.sort(key=lambda r: (str(r.get("date") or ""), str(r.get("group_type") or ""), str(r.get("display_path") or "")), reverse=True)
+    metric_rows.sort(key=lambda r: (str(r.get("date") or ""), str(r.get("group_type") or ""), str(r.get("display_path") or "")), reverse=True)
+    path = _write_combined_theme_history_snapshot(dest_dir, rows=leader_rows, metric_rows=metric_rows, max_days=max_days)
+    dates = sorted({str(r.get("date") or "") for r in metric_rows if r.get("date")})
+    return {
+        "path": path,
+        "leader_rows": len(leader_rows),
+        "metric_rows": len(metric_rows),
+        "distinct_dates": len(dates),
+        "min_date": dates[0] if dates else None,
+        "max_date": dates[-1] if dates else None,
+    }
 
 
 def _history_display_path_from_row(r: dict[str, Any]) -> str:
@@ -403,6 +729,7 @@ def _full_leader_history_by_date(
             "theme_rs": float(r.get("theme_rs") or 0.0),
             "theme_rank": int(r.get("theme_rank") or 0),
             "leader_top_stocks": norm,
+            "leader_status": "주도",
         }
         by_date.setdefault(d, []).append(ent)
     for d_key in by_date:
@@ -432,10 +759,15 @@ def _full_leader_history_by_date(
                 "theme_rs": float(a.get("relative_strength_score") or 0.0),
                 "theme_rank": int(a.get("relative_strength_rank") or 0),
                 "leader_top_stocks": stocks,
+                "leader_status": "주도",
             }
         )
     today_list.sort(key=lambda x: (-float(x.get("theme_rs") or 0.0), str(x.get("display_path") or "")))
-    by_date[str(today).strip()] = today_list
+    today_key = str(today).strip()
+    if today_list:
+        by_date[today_key] = today_list
+    elif today_key not in by_date:
+        by_date[today_key] = []
     return by_date
 
 
@@ -453,6 +785,70 @@ def _leader_history_sections_from_by_date(
         out.append((d, rows_d))
         if len(out) >= max(1, int(max_days)):
             break
+    return out
+
+
+def _group_snapshot_rows_by_date(history_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    g: dict[str, list[dict[str, Any]]] = {}
+    for r in history_rows:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("leader_status") or "").strip() != "주도":
+            continue
+        d = str(r.get("date") or "").strip()
+        if not d:
+            continue
+        g.setdefault(d, []).append(r)
+    for d in g:
+        g[d].sort(
+            key=lambda x: (
+                -float(x.get("theme_rs") or 0.0),
+                str(_history_display_path_from_row(x)),
+            )
+        )
+    return g
+
+
+def _snapshot_row_to_calendar_ent(r: dict[str, Any], *, lim: int) -> dict[str, Any]:
+    raw = list(r.get("leader_top_stocks") or [])
+    norm = raw[: max(1, int(lim))] if raw else []
+    return {
+        "group_type": str(r.get("group_type") or ""),
+        "display_path": _history_display_path_from_row(r),
+        "theme_rs": float(r.get("theme_rs") or 0.0),
+        "theme_rank": int(r.get("theme_rank") or 0),
+        "leader_top_stocks": norm,
+        "leader_status": str(r.get("leader_status") or "").strip() or "—",
+    }
+
+
+def _calendar_display_by_date(
+    leader_by_date: dict[str, list[dict[str, Any]]],
+    history_rows: list[dict[str, Any]],
+    month_first: _dt.date,
+    month_last: _dt.date,
+    *,
+    fallback_top: int = 3,
+    repr_stocks: int = 1,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    캘린더 칸: 주도 테마만 표시한다. history_rows도 로드 단계에서 주도만 정규화된다.
+    """
+    raw_by_d = _group_snapshot_rows_by_date(history_rows)
+    out: dict[str, list[dict[str, Any]]] = {}
+    cur = month_first
+    lim = max(1, int(repr_stocks))
+    ft = max(1, int(fallback_top))
+    while cur <= month_last:
+        key = cur.isoformat()
+        prim = list(leader_by_date.get(key) or [])
+        if prim:
+            out[key] = prim
+        else:
+            rows = list(raw_by_d.get(key) or [])
+            if rows:
+                out[key] = [_snapshot_row_to_calendar_ent(r, lim=lim) for r in rows[:ft]]
+        cur += _dt.timedelta(days=1)
     return out
 
 
@@ -544,12 +940,16 @@ def _render_theme_history_calendar_html(
                     path = str(e.get("display_path") or "-")
                     path_d = path if len(path) <= 18 else path[:16] + "…"
                     stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
+                    st_raw = str(e.get("leader_status") or "").strip()
+                    tag_html = ""
+                    if st_raw and st_raw != "주도":
+                        tag_html = f" <span class=\"cal-tag\">{_escape_html(st_raw)}</span>"
                     if stk:
                         nm = _escape_html(str(stk.get("name") or stk.get("symbol") or "-"))
                         sym = _escape_html(str(stk.get("symbol") or ""))
-                        line = f"{_escape_html(path_d)} · {nm} <code>({sym})</code>"
+                        line = f"{_escape_html(path_d)} · {nm} <code>({sym})</code>{tag_html}"
                     else:
-                        line = _escape_html(path_d)
+                        line = f"{_escape_html(path_d)}{tag_html}"
                     parts.append(f'<div class="cal-line">{line}</div>')
                 if len(ents) > int(max_lines_per_cell):
                     parts.append(f'<div class="cal-more">+{len(ents) - int(max_lines_per_cell)} 테마</div>')
@@ -559,7 +959,9 @@ def _render_theme_history_calendar_html(
     return "".join(parts)
 
 
-def _render_theme_history_calendar_md(by_date: dict[str, list[dict[str, Any]]], anchor: str) -> list[str]:
+def _render_theme_history_calendar_md(
+    by_date: dict[str, list[dict[str, Any]]], anchor: str
+) -> list[str]:
     ad = _parse_calendar_anchor_date(anchor)
     if not ad:
         return []
@@ -567,6 +969,8 @@ def _render_theme_history_calendar_md(by_date: dict[str, list[dict[str, Any]]], 
     month_first, month_last = _month_bounds(y, m)
     lines: list[str] = [
         f"### 주도테마 캘린더 ({y}년 {m}월, 테마당 대표 1종목)",
+        "",
+        "> 히스토리에는 **주도** 테마와 대표 종목 1개만 기록합니다.",
         "",
     ]
     cur = month_first
@@ -578,12 +982,14 @@ def _render_theme_history_calendar_md(by_date: dict[str, list[dict[str, Any]]], 
             for e in ents:
                 path = str(e.get("display_path") or "-")
                 stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
+                st = str(e.get("leader_status") or "").strip()
+                suf = f" `{st}`" if st and st != "주도" else ""
                 if stk:
                     nm = str(stk.get("name") or stk.get("symbol") or "-")
                     sym = str(stk.get("symbol") or "")
-                    lines.append(f"  - {path} — {nm} (`{sym}`)")
+                    lines.append(f"  - {path} — {nm} (`{sym}`){suf}")
                 else:
-                    lines.append(f"  - {path}")
+                    lines.append(f"  - {path}{suf}")
         cur += _dt.timedelta(days=1)
     lines.append("")
     return lines
@@ -605,24 +1011,26 @@ def _render_theme_history_section_html(
     *,
     history_by_date: dict[str, list[dict[str, Any]]] | None = None,
     history_calendar_anchor: str = "",
+    calendar_display_by_date: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     by_date = history_by_date if history_by_date is not None else dict(sections)
+    cal_src = calendar_display_by_date if calendar_display_by_date is not None else by_date
+    has_cal = bool(cal_src) and any(bool(v) for v in cal_src.values())
     cal_html = (
-        _render_theme_history_calendar_html(by_date, history_calendar_anchor)
+        _render_theme_history_calendar_html(cal_src, history_calendar_anchor)
         if history_calendar_anchor
         else ""
     )
-    if not sections and not any(by_date.values()):
+    if not sections and not any(by_date.values()) and not has_cal:
         return (
             "<details class=\"section fold\" open><summary class=\"section-title\">주도테마 캘린더·히스토리</summary>"
             "<div class=\"leaderboard\"><p class=\"lb-footnote\">표시할 히스토리가 없습니다. "
-            "<code>data/theme_history/theme_snapshot_YYYYMMDD.json</code> 이 쌓이면 날짜별로 나타납니다.</p></div></details>"
+            "<code>data/theme_history/theme_history_snapshot.json</code> 또는 일별 스냅샷이 쌓이면 날짜별로 나타납니다.</p></div></details>"
         )
     parts: list[str] = [
         "<details class=\"section fold\" open><summary class=\"section-title\">주도테마 캘린더·히스토리</summary>",
         "<div class=\"leaderboard\">",
-        "<p class=\"lb-footnote\">월 캘린더: <strong>주도</strong> 테마만, 테마당 <strong>대표 종목 1개</strong>만 표시합니다. "
-        "오늘 칸은 방금 생성한 리포트 기준입니다.</p>",
+        "<p class=\"lb-footnote\">월 캘린더: <strong>주도</strong> 테마와 대표 종목 1개만 표시합니다.</p>",
     ]
     if cal_html:
         parts.append(cal_html)
@@ -661,18 +1069,21 @@ def _render_theme_history_section_md(
     *,
     history_by_date: dict[str, list[dict[str, Any]]] | None = None,
     history_calendar_anchor: str = "",
+    calendar_display_by_date: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     by_date = history_by_date if history_by_date is not None else dict(sections)
+    cal_src = calendar_display_by_date if calendar_display_by_date is not None else by_date
+    has_cal = bool(cal_src) and any(bool(v) for v in cal_src.values())
     lines: list[str] = [
         "",
         "## 주도테마 캘린더·히스토리",
         "",
     ]
-    if not sections and not any(by_date.values()):
-        lines.append("> 표시할 히스토리가 없습니다. `data/theme_history/theme_snapshot_*.json` 이 쌓이면 날짜별로 나타납니다.")
+    if not sections and not any(by_date.values()) and not has_cal:
+        lines.append("> 표시할 히스토리가 없습니다. `data/theme_history/theme_history_snapshot.json` 또는 일별 스냅샷이 쌓이면 날짜별로 나타납니다.")
         lines.append("")
         return lines
-    lines.extend(_render_theme_history_calendar_md(by_date, history_calendar_anchor))
+    lines.extend(_render_theme_history_calendar_md(cal_src, history_calendar_anchor))
     lines.append("#### 일자별 상세 (대표 1종목)")
     lines.append("")
     for d, ents in sections:
@@ -1642,6 +2053,7 @@ def _render_theme_summary_md(
     history_sections: list[tuple[str, list[dict[str, Any]]]] | None = None,
     history_by_date: dict[str, list[dict[str, Any]]] | None = None,
     history_calendar_anchor: str = "",
+    calendar_display_by_date: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     hist = history_sections if history_sections is not None else []
     lines = [
@@ -1664,6 +2076,7 @@ def _render_theme_summary_md(
             hist,
             history_by_date=history_by_date,
             history_calendar_anchor=history_calendar_anchor,
+            calendar_display_by_date=calendar_display_by_date,
         )
     )
     lines.extend(
@@ -1964,6 +2377,7 @@ def _render_theme_report_html(
     history_sections: list[tuple[str, list[dict[str, Any]]]] | None = None,
     history_by_date: dict[str, list[dict[str, Any]]] | None = None,
     history_calendar_anchor: str = "",
+    calendar_display_by_date: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     leader_count = sum(1 for row in major_rows + middle_rows if dict(row.get("analysis") or {}).get("leader_status") == "주도")
     hist = history_sections if history_sections is not None else []
@@ -2006,6 +2420,7 @@ def _render_theme_report_html(
         ".cal-lines{margin-top:5px;color:#334155;line-height:1.35;}"
         ".cal-line{word-break:break-word;margin-top:3px;}"
         ".cal-more{margin-top:4px;font-size:10px;color:var(--muted);}"
+        ".cal-tag{font-size:10px;color:#64748b;font-weight:600;}"
         "</style></head><body><div class=\"wrap\">"
         "<section class=\"hero\">"
         "<h1>Theme Major/Middle Sector Overview</h1>"
@@ -2020,7 +2435,7 @@ def _render_theme_report_html(
         f"<div class=\"hero-stat\"><div class=\"label\">주도 그룹</div><div class=\"value\">{leader_count}</div></div>"
         f"<div class=\"hero-stat\"><div class=\"label\">분류 스키마</div><div class=\"value\">{_escape_html(meta.get('schema_version', '-'))}</div></div>"
         "</div></section>"
-        f"{_render_theme_history_section_html(hist, history_by_date=history_by_date, history_calendar_anchor=history_calendar_anchor)}"
+        f"{_render_theme_history_section_html(hist, history_by_date=history_by_date, history_calendar_anchor=history_calendar_anchor, calendar_display_by_date=calendar_display_by_date)}"
         f"{_render_leaderboard_html(major_rows, title='대분류 Leaderboard', top_n=top_n, open_by_default=True, footnote='그룹 점수는 다른 대분류와만 비교. 종목 RS·백분위·대표는 해당 대분류(하위 전체, 종목 중복 제거) 구성만 기준.')}"
         f"{_render_leaderboard_html_v2(major_rows, title='대분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%).')}"
         f"{_render_leaderboard_html(middle_rows, title='중분류 Leaderboard', top_n=top_n, open_by_default=False, footnote='그룹 점수는 다른 중분류와만 비교(대분류 랭킹과 별도). 종목 RS·백분위·대표는 그 중분류에만 싣은 구성으로만. 표본이 적은 중분류는 지표가 요동칠 수 있음.')}"
@@ -2058,6 +2473,22 @@ def main() -> None:
     )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Output directory.")
     parser.add_argument("--theme-history-dir", type=Path, default=DEFAULT_THEME_HISTORY_DIR, help="Theme snapshot history directory.")
+    parser.add_argument(
+        "--no-sync-theme-history",
+        action="store_true",
+        help="Skip downloading theme history snapshots from GitHub theme-sector releases before collect.",
+    )
+    parser.add_argument(
+        "--theme-history-sync-repo",
+        default="",
+        help="owner/repo for sync (default: GITHUB_REPOSITORY env, else chans-nim/Sauvignon).",
+    )
+    parser.add_argument(
+        "--theme-history-sync-max-releases",
+        type=int,
+        default=60,
+        help="Max matching GitHub releases to apply when syncing theme history (0 = no limit).",
+    )
     parser.add_argument(
         "--history-report-days",
         type=int,
@@ -2112,6 +2543,87 @@ def main() -> None:
         raise SystemExit("--no-quote-enrichment 와 --full-quote-enrichment 는 함께 쓸 수 없습니다.")
     quote_enrichment = not bool(args.no_quote_enrichment)
     quote_enrichment_mode = "all" if bool(args.full_quote_enrichment) else "top_by_group"
+
+    history_dir = Path(args.theme_history_dir)
+    history_dir.mkdir(parents=True, exist_ok=True)
+
+    if not bool(args.no_sync_theme_history):
+        try:
+            from scripts.sync_theme_history_from_github_releases import parse_repo_from_url, sync_theme_snapshots
+
+            repo_raw = (
+                str(args.theme_history_sync_repo or "").strip()
+                or os.getenv("GITHUB_REPOSITORY", "").strip()
+                or "chans-nim/Sauvignon"
+            )
+            repo = parse_repo_from_url(repo_raw)
+            if not repo or "/" not in repo:
+                repo = "chans-nim/Sauvignon"
+            if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
+                n_dl = sync_theme_snapshots(
+                    repo,
+                    history_dir,
+                    explicit_prefix=None,
+                    max_releases=max(0, int(args.theme_history_sync_max_releases)),
+                )
+                print(f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신 ({repo})")
+            else:
+                with tempfile.TemporaryDirectory(prefix="theme-history-release-") as td:
+                    release_dir = Path(td)
+                    n_dl = sync_theme_snapshots(
+                        repo,
+                        release_dir,
+                        explicit_prefix=None,
+                        max_releases=max(0, int(args.theme_history_sync_max_releases)),
+                    )
+                    release_rows = _load_theme_history_rows(release_dir, max_days=0)
+                    release_dates = sorted(
+                        {
+                            str(r.get("date") or "").strip()
+                            for r in release_rows
+                            if str(r.get("date") or "").strip()
+                        }
+                    )
+                    if not release_dates:
+                        print(
+                            f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신, "
+                            "사용 가능한 날짜 없음 → 로컬 히스토리 유지"
+                        )
+                    elif len(release_dates) < THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK:
+                        merged = _combine_theme_history_dirs(
+                            [history_dir, release_dir],
+                            history_dir,
+                            max_days=THEME_HISTORY_LOAD_MAX_FILES,
+                        )
+                        print(
+                            f"[theme-history] GitHub 릴리즈 날짜 {len(release_dates)}일 "
+                            f"(< {THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK}) → 로컬 히스토리와 병합: "
+                            f"{merged['distinct_dates']}일, metric {merged['metric_rows']}줄"
+                        )
+                    else:
+                        merged = _combine_theme_history_dirs(
+                            [release_dir],
+                            history_dir,
+                            max_days=THEME_HISTORY_LOAD_MAX_FILES,
+                        )
+                        print(
+                            f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신 ({repo}), "
+                            f"릴리즈 히스토리 {merged['distinct_dates']}일 사용"
+                        )
+        except Exception as exc:
+            print(
+                f"[theme-history] WARNING: GitHub 동기화 실패 — 로컬 `data/theme_history` 만 사용합니다: {exc}",
+                file=sys.stderr,
+            )
+    else:
+        print("[theme-history] GitHub 동기화 생략 (--no-sync-theme-history)")
+
+    snap_disk = _theme_history_local_summary(history_dir)
+    print(
+        f"[theme-history] 로컬 디스크: 히스토리 스냅샷 {snap_disk['file_count']}개, "
+        f"스냅샷 영업일 {snap_disk['distinct_file_dates']}일 "
+        f"({snap_disk['min_file_date'] or '-'} ~ {snap_disk['max_file_date'] or '-'})"
+    )
 
     source_path = _resolve_classification_json(Path(args.classification_json))
     if not source_path.is_file():
@@ -2246,8 +2758,20 @@ def main() -> None:
         collected_at = _now_kst_iso()
     today_yyyy_mm_dd = _parse_iso_date(collected_at) or str(_dt.date.today().isoformat())
 
-    history_dir = Path(args.theme_history_dir)
-    history_rows = _load_theme_history_rows(history_dir, max_days=40)
+    history_rows = _load_theme_history_rows(history_dir, max_days=THEME_HISTORY_LOAD_MAX_FILES)
+    leader_history_rows = _load_theme_history_rows(
+        history_dir,
+        max_days=THEME_HISTORY_LOAD_MAX_FILES,
+        leaders_only=True,
+    )
+    dates_in_rows = sorted(
+        {str(r.get("date") or "").strip() for r in history_rows if isinstance(r, dict) and str(r.get("date") or "").strip()}
+    )
+    print(
+        f"[theme-history] 이번 실행 persistence/v2 입력: flatten row {len(history_rows)}줄, "
+        f"날짜 종류 {len(dates_in_rows)}개 ({dates_in_rows[0] if dates_in_rows else '-'} ~ "
+        f"{dates_in_rows[-1] if dates_in_rows else '-'}) — 최근 날짜 최대 {THEME_HISTORY_LOAD_MAX_FILES}개만 로드"
+    )
 
     # market_up_ratio: classification 전체(고유 심볼) 중 당일 상승 비율
     all_unique_syms = _all_unique_stock_symbols_from_groups(major_blueprints + middle_blueprints)
@@ -2380,46 +2904,20 @@ def main() -> None:
     _inject_v2(middle_rows, cohort_history=middle_hist)
 
     # --- Write history snapshot for future runs ---
-    snapshot_rows: list[dict[str, Any]] = []
-    for row in major_rows + middle_rows:
-        a = dict(row.get("analysis") or {})
-        disp = str(row.get("display_path") or "").strip()
-        top_stocks: list[dict[str, Any]] = []
-        if str(a.get("leader_status") or "") == "주도":
-            for m in (row.get("major_stocks") or [])[:1]:
-                sym = _norm_kis_stock_symbol(m.get("symbol", ""))
-                if not sym:
-                    continue
-                top_stocks.append(
-                    {"symbol": sym, "name": str(m.get("name") or "").strip(), "rs": m.get("rs")}
-                )
-        snapshot_rows.append(
-            {
-                "date": today_yyyy_mm_dd,
-                "group_type": str(row.get("group_type") or ""),
-                "major_category": row.get("major_category"),
-                "middle_category": row.get("middle_category"),
-                "display_path": disp or _history_display_path_from_row(
-                    {
-                        "major_category": row.get("major_category"),
-                        "middle_category": row.get("middle_category"),
-                        "group_type": row.get("group_type"),
-                    }
-                ),
-                "theme_rs": float(a.get("relative_strength_score") or 0.0),
-                "theme_rank": int(a.get("relative_strength_rank") or 0),
-                "member_count": int(a.get("member_count") or 0),
-                "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
-                "total_value_traded": float(a.get("total_value_traded") or 0.0),
-                "up_ratio": float(a.get("up_ratio") or 0.0),
-                "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
-                "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
-                "leader_status": str(a.get("leader_status") or ""),
-                "leader_top_stocks": top_stocks,
-            }
-        )
+    snapshot_rows = _build_theme_history_snapshot_rows(
+        major_rows,
+        middle_rows,
+        today_yyyy_mm_dd,
+        fallback_count=THEME_HISTORY_FALLBACK_LEADER_COUNT,
+    )
+    metric_snapshot_rows = _build_theme_metric_history_rows(major_rows, middle_rows, today_yyyy_mm_dd)
     try:
-        snap_path = _write_theme_history_snapshot(history_dir, date_yyyy_mm_dd=today_yyyy_mm_dd, rows=snapshot_rows)
+        snap_path = _write_theme_history_snapshot(
+            history_dir,
+            date_yyyy_mm_dd=today_yyyy_mm_dd,
+            rows=snapshot_rows,
+            metric_rows=metric_snapshot_rows,
+        )
         print(f"Wrote theme history snapshot {snap_path}")
     except Exception as exc:
         print(f"WARNING: write theme history snapshot failed: {exc}", file=sys.stderr)
@@ -2445,8 +2943,9 @@ def main() -> None:
         "market_up_ratio": _round1((market_up_ratio or 0.0) * 100.0) if market_up_ratio is not None else None,
     }
 
+    history_rows_for_report = leader_history_rows + snapshot_rows
     history_by_date = _full_leader_history_by_date(
-        history_rows,
+        history_rows_for_report,
         today_yyyy_mm_dd,
         major_rows,
         middle_rows,
@@ -2457,6 +2956,19 @@ def main() -> None:
         today_yyyy_mm_dd,
         max(1, int(args.history_report_days)),
     )
+    _anchor_d = _parse_calendar_anchor_date(today_yyyy_mm_dd)
+    if _anchor_d is not None:
+        _mf, _ml = _month_bounds(_anchor_d.year, _anchor_d.month)
+        calendar_display_by_date = _calendar_display_by_date(
+            history_by_date,
+            history_rows_for_report,
+            _mf,
+            _ml,
+            fallback_top=3,
+            repr_stocks=1,
+        )
+    else:
+        calendar_display_by_date = None
 
     payload = {
         "metadata": meta,
@@ -2478,6 +2990,7 @@ def main() -> None:
             history_sections=history_sections,
             history_by_date=history_by_date,
             history_calendar_anchor=today_yyyy_mm_dd,
+            calendar_display_by_date=calendar_display_by_date,
         ),
         encoding="utf-8",
     )
@@ -2492,6 +3005,7 @@ def main() -> None:
             history_sections=history_sections,
             history_by_date=history_by_date,
             history_calendar_anchor=today_yyyy_mm_dd,
+            calendar_display_by_date=calendar_display_by_date,
         ),
         encoding="utf-8",
     )

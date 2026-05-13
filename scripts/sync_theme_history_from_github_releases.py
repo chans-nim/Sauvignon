@@ -1,5 +1,6 @@
 """
-`theme-sector-*`(및 구 `thema-sector-*`) GitHub Release에 첨부된 `theme_snapshot_*.json` 자산을 내려받아
+`theme-sector-*`(및 구 `thema-sector-*`) GitHub Release에 첨부된 통합 `theme_history_snapshot.json`
+또는 구 `theme_snapshot_*.json` 자산을 내려받아
 `data/theme_history/` 를 채운다. CI에서는 수집 전에 실행해 영속 히스토리를 이어 받는다.
 
 태그는 시간순(오래된 것 먼저)으로 처리해, 같은 영업일에 여러 번 릴리즈된 경우
@@ -26,6 +27,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.theme_sector_release_lib import (  # noqa: E402
+    THEME_HISTORY_SNAPSHOT_ASSET,
     is_theme_sector_release_tag,
     theme_sector_tag_sort_key,
 )
@@ -81,6 +83,15 @@ def download_asset_by_api(repo: str, asset: dict, dest: Path) -> Path:
 
 
 def pick_theme_snapshot_asset(assets: list) -> dict | None:
+    combined = [
+        a
+        for a in assets
+        if isinstance(a, dict) and str(a.get("name") or "") == THEME_HISTORY_SNAPSHOT_ASSET
+    ]
+    if combined:
+        if len(combined) > 1:
+            raise SystemExit(f"Expected one {THEME_HISTORY_SNAPSHOT_ASSET} asset")
+        return combined[0]
     matches = [
         a
         for a in assets
@@ -190,7 +201,7 @@ def sync_theme_snapshots(
         assets = fetch_release_assets(repo, tag)
         snap = pick_theme_snapshot_asset(assets)
         if not snap:
-            print(f"[sync-theme-history] skip {tag}: no {THEME_SNAPSHOT_GLOB}")
+            print(f"[sync-theme-history] skip {tag}: no {THEME_HISTORY_SNAPSHOT_ASSET} / {THEME_SNAPSHOT_GLOB}")
             continue
         name = str(snap.get("name") or "")
         dest = dest_dir / name

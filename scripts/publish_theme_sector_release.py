@@ -2,7 +2,7 @@
 수집 산출물을 `theme-sector-YYYYMMDD-HHMM` 태그로 GitHub Release에 올린다.
 
 첨부:
-  - theme_snapshot_YYYYMMDD.json (히스토리 디렉터리에서 당일 스냅샷)
+  - theme_history_snapshot.json (히스토리 디렉터리의 기존/당일 스냅샷을 주도 테마만 통합)
   - overview.json, overview.html
   - theme_history_index.json (릴리즈 메타·동기화용)
   - theme_major_middle_stock_classification_dup_allowed.json (있을 때)
@@ -23,7 +23,7 @@ from pathlib import Path
 if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.theme_sector_release_lib import THEME_SECTOR_TAG_PREFIX  # noqa: E402
+from scripts.theme_sector_release_lib import THEME_HISTORY_SNAPSHOT_ASSET, THEME_SECTOR_TAG_PREFIX  # noqa: E402
 
 
 def parse_repo_from_url(repo_or_url: str) -> str:
@@ -37,12 +37,163 @@ def parse_repo_from_url(repo_or_url: str) -> str:
     return s
 
 
-def pick_snapshot_for_date(history_dir: Path, snapshot_date_yyyy_mm_dd: str) -> Path:
-    ymd = str(snapshot_date_yyyy_mm_dd).replace("-", "")
-    p = history_dir / f"theme_snapshot_{ymd}.json"
-    if not p.is_file():
-        raise SystemExit(f"theme history snapshot not found: {p}")
-    return p
+def _date_yyyymmdd(date_yyyy_mm_dd: str) -> str:
+    return str(date_yyyy_mm_dd).strip().replace("-", "")[:8]
+
+
+def _display_path_from_row(r: dict) -> str:
+    dp = str(r.get("display_path") or "").strip()
+    if dp:
+        return dp
+    major = str(r.get("major_category") or "").strip()
+    middle = r.get("middle_category")
+    gt = str(r.get("group_type") or "")
+    if gt == "major":
+        return major or "-"
+    mid = "" if middle is None else str(middle).strip()
+    if major and mid:
+        return f"{major} > {mid}"
+    return major or mid or "-"
+
+
+def _normalize_leader_row(r: dict) -> dict | None:
+    if str(r.get("leader_status") or "").strip() != "주도":
+        return None
+    d = str(r.get("date") or "").strip()
+    if not d:
+        return None
+    stocks: list[dict] = []
+    for s in list(r.get("leader_top_stocks") or [])[:1]:
+        if not isinstance(s, dict):
+            continue
+        sym = str(s.get("symbol") or "").strip()
+        if not sym:
+            continue
+        stocks.append(
+            {
+                "symbol": sym.zfill(6) if sym.isdigit() else sym,
+                "name": str(s.get("name") or "").strip(),
+                "rs": s.get("rs"),
+            }
+        )
+    return {
+        "date": d,
+        "group_type": str(r.get("group_type") or ""),
+        "major_category": r.get("major_category"),
+        "middle_category": r.get("middle_category"),
+        "display_path": _display_path_from_row(r),
+        "theme_rs": float(r.get("theme_rs") or 0.0),
+        "theme_rank": int(r.get("theme_rank") or 0),
+        "member_count": int(r.get("member_count") or 0),
+        "top_members_value_sum": float(r.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(r.get("total_value_traded") or 0.0),
+        "up_ratio": float(r.get("up_ratio") or 0.0),
+        "rs60_ratio": float(r.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(r.get("rs70_ratio") or 0.0),
+        "leader_status": "주도",
+        "leader_top_stocks": stocks,
+    }
+
+
+def _normalize_metric_row(r: dict) -> dict | None:
+    d = str(r.get("date") or "").strip()
+    if not d:
+        return None
+    return {
+        "date": d,
+        "group_type": str(r.get("group_type") or ""),
+        "major_category": r.get("major_category"),
+        "middle_category": r.get("middle_category"),
+        "display_path": _display_path_from_row(r),
+        "theme_rs": float(r.get("theme_rs") or 0.0),
+        "theme_rank": int(r.get("theme_rank") or 0),
+        "member_count": int(r.get("member_count") or 0),
+        "top_members_value_sum": float(r.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(r.get("total_value_traded") or 0.0),
+        "up_ratio": float(r.get("up_ratio") or 0.0),
+        "rs60_ratio": float(r.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(r.get("rs70_ratio") or 0.0),
+        "leader_status": str(r.get("leader_status") or ""),
+    }
+
+
+def _read_snapshot_rows(path: Path, *, leaders_only: bool = False) -> list[dict]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if isinstance(payload, dict):
+        raw_rows = payload.get("rows") if leaders_only else payload.get("metric_rows") or payload.get("rows")
+    else:
+        raw_rows = payload
+    if not isinstance(raw_rows, list):
+        return []
+    rows: list[dict] = []
+    for r in raw_rows:
+        if isinstance(r, dict):
+            nr = _normalize_leader_row(r) if leaders_only else _normalize_metric_row(r)
+            if nr is not None:
+                rows.append(nr)
+    return rows
+
+
+def write_combined_snapshot(history_dir: Path, snapshot_date_yyyy_mm_dd: str, out_path: Path) -> Path:
+    files: list[Path] = []
+    combined = Path(history_dir) / THEME_HISTORY_SNAPSHOT_ASSET
+    if combined.is_file():
+        files.append(combined)
+    files.extend(sorted(Path(history_dir).glob("theme_snapshot_*.json"), key=lambda p: p.name))
+    today_file = Path(history_dir) / f"theme_snapshot_{_date_yyyymmdd(snapshot_date_yyyy_mm_dd)}.json"
+    if not today_file.is_file() and not combined.is_file():
+        raise SystemExit(f"theme history snapshot not found: {today_file}")
+
+    by_key: dict[tuple[str, str, str, str, str], dict] = {}
+    metric_by_key: dict[tuple[str, str, str, str, str], dict] = {}
+    for p in files:
+        for r in _read_snapshot_rows(p, leaders_only=True):
+            key = (
+                str(r.get("date") or ""),
+                str(r.get("group_type") or ""),
+                str(r.get("major_category") or ""),
+                str(r.get("middle_category") or ""),
+                str(r.get("display_path") or ""),
+            )
+            by_key[key] = r
+        for r in _read_snapshot_rows(p, leaders_only=False):
+            key = (
+                str(r.get("date") or ""),
+                str(r.get("group_type") or ""),
+                str(r.get("major_category") or ""),
+                str(r.get("middle_category") or ""),
+                str(r.get("display_path") or ""),
+            )
+            metric_by_key[key] = r
+    rows = list(by_key.values())
+    metric_rows = list(metric_by_key.values())
+    rows.sort(
+        key=lambda r: (
+            str(r.get("date") or ""),
+            str(r.get("group_type") or ""),
+            str(r.get("display_path") or ""),
+        ),
+        reverse=True,
+    )
+    metric_rows.sort(
+        key=lambda r: (
+            str(r.get("date") or ""),
+            str(r.get("group_type") or ""),
+            str(r.get("display_path") or ""),
+        ),
+        reverse=True,
+    )
+    payload = {
+        "schema_version": 2,
+        "date": str(snapshot_date_yyyy_mm_dd).strip(),
+        "rows": rows,
+        "metric_rows": metric_rows,
+    }
+    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out_path
 
 
 def write_index_json(
@@ -134,12 +285,16 @@ def main() -> None:
         raise SystemExit("could not resolve snapshot date; pass --snapshot-date YYYY-MM-DD")
 
     history_dir = Path(args.theme_history_dir)
-    snapshot_path = pick_snapshot_for_date(history_dir, snap_date)
     classification_json = Path(args.classification_json)
     if not classification_json.is_file():
         classification_json = None
 
     with tempfile.TemporaryDirectory() as tmp:
+        snapshot_path = write_combined_snapshot(
+            history_dir,
+            snap_date,
+            Path(tmp) / THEME_HISTORY_SNAPSHOT_ASSET,
+        )
         index_path = Path(tmp) / "theme_history_index.json"
         write_index_json(
             index_path,
@@ -151,7 +306,7 @@ def main() -> None:
         )
         title = f"Theme sector run {args.tag}"
         notes = (
-            f"Theme snapshot: `{snapshot_path.name}`\n\n"
+            f"Theme history snapshot: `{snapshot_path.name}`\n\n"
             "Prior snapshots: `python -m scripts.sync_theme_history_from_github_releases`"
         )
         files = [snapshot_path, overview_json, overview_html, index_path]
