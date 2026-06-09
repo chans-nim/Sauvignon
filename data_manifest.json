@@ -1,48 +1,41 @@
 {
   "schema_version": 2,
   "latest_current": {
-    "tag": "data-snapshot-20260609-0630",
+    "tag": "data-snapshot-20260609-1933",
     "release_type": "snapshot",
-    "file_name": "data-snapshot-20260609-0630.parquet",
+    "file_name": "data-snapshot-20260609-1933.parquet",
     "sha256": "ab48ff874072912029e219480ebee84390c418d039f9fe520d7ba67fb820b6fa",
     "row_count": 7233181,
-    "created_at": "2026-06-09T06:31:05Z",
+    "created_at": "2026-06-09T19:34:29Z",
     "min_date": "2016-01-04",
     "max_date": "2026-06-09",
     "assets": [
       {
-        "name": "data-snapshot-20260609-0630.json",
-        "sha256": "c16cef5344a057242ce82a4d6980d062608cc7313c883ca1e5f2a41510e32463",
-        "bytes": 1498,
-        "updated_at": "2026-06-09T06:31:05Z",
+        "name": "data-snapshot-20260609-1933.json",
+        "sha256": "a24957e4d85bbbfb7cc842bac73fffd3777d18a29c123accf9228436e3c219af",
+        "bytes": 1233,
+        "updated_at": "2026-06-09T19:34:29Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260609-0630.output1-latest.parquet",
-        "sha256": "95a755feaf7e8cd32adf49bffc2edd3e946e9758ba3296f1e6016708f7cf1073",
-        "bytes": 1674655,
-        "updated_at": "2026-06-09T06:31:05Z",
-        "release_type": "snapshot"
-      },
-      {
-        "name": "data-snapshot-20260609-0630.parquet",
+        "name": "data-snapshot-20260609-1933.parquet",
         "sha256": "ab48ff874072912029e219480ebee84390c418d039f9fe520d7ba67fb820b6fa",
         "bytes": 140828343,
-        "updated_at": "2026-06-09T06:31:05Z",
+        "updated_at": "2026-06-09T19:34:29Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260609-0630.sha256",
+        "name": "data-snapshot-20260609-1933.sha256",
         "sha256": "9ce26187241f7c11406ee6be63671a54d68d1cc29e28550ca6541266f6ec914f",
         "bytes": 65,
-        "updated_at": "2026-06-09T06:31:05Z",
+        "updated_at": "2026-06-09T19:34:29Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260609-0630.ticker-state.parquet",
-        "sha256": "9c465510e62e5c89c4cc65f82ccd3c7aecdc8212d1f558bbec88710ea9919cda",
-        "bytes": 194065,
-        "updated_at": "2026-06-09T06:31:05Z",
+        "name": "data-snapshot-20260609-1933.ticker-state.parquet",
+        "sha256": "e5f0b52f001617a54528bc5a2fea5c53579a2c769c0a94f7c04093352a6ec052",
+        "bytes": 197649,
+        "updated_at": "2026-06-09T19:34:29Z",
         "release_type": "snapshot"
       }
     ]
@@ -61,9 +54,14 @@
   },
   "release_type": "snapshot",
   "row_count": 7233181,
-  "created_at": "2026-06-09T06:31:05Z",
+  "created_at": "2026-06-09T19:34:29Z",
   "history": {
     "release_tags": [
+      {
+        "tag": "data-snapshot-20260609-1933",
+        "release_type": "snapshot",
+        "created_at": "2026-06-09T19:34:29Z"
+      },
       {
         "tag": "data-snapshot-20260609-0630",
         "release_type": "snapshot",
@@ -658,11 +656,6 @@
         "tag": "data-snapshot-20260327-0545",
         "release_type": "snapshot",
         "created_at": "2026-03-27T05:46:21Z"
-      },
-      {
-        "tag": "data-snapshot-20260326-1209",
-        "release_type": "snapshot",
-        "created_at": "2026-03-26T12:10:54Z"
       }
     ],
     "delta_tags": []
