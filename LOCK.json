@@ -1,7 +1,7 @@
 {
-  "locked": false,
+  "locked": true,
   "owner": "github-actions",
-  "run_id": "28076789818",
-  "started_at": "2026-06-24T05:14:15.954930Z",
-  "expires_at": "2026-06-24T07:14:15.954930Z"
+  "run_id": "28102037850",
+  "started_at": "2026-06-24T13:29:04.073973Z",
+  "expires_at": "2026-06-24T15:29:04.073973Z"
 }
