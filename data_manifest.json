@@ -1,48 +1,48 @@
 {
   "schema_version": 2,
   "latest_current": {
-    "tag": "data-snapshot-20260514-0555",
+    "tag": "data-snapshot-20260709-1407",
     "release_type": "snapshot",
-    "file_name": "data-snapshot-20260514-0555.parquet",
-    "sha256": "f57700c270a042d6cd4d05b63783486acd3cde7686ca1312cea04cf3795dc7a4",
-    "row_count": 7164712,
-    "created_at": "2026-05-14T05:56:39Z",
+    "file_name": "data-snapshot-20260709-1407.parquet",
+    "sha256": "16b9e700eac9c03e8ec059f62fdef88c251b307c1075c583f8c06b79036d92c1",
+    "row_count": 7327403,
+    "created_at": "2026-07-09T14:08:46Z",
     "min_date": "2016-01-04",
-    "max_date": "2026-05-14",
+    "max_date": "2026-07-09",
     "assets": [
       {
-        "name": "data-snapshot-20260514-0555.json",
-        "sha256": "8d16d3237a4ee224e6893794868482245e6b72427e4a674b69f5688e1f9675f9",
-        "bytes": 1498,
-        "updated_at": "2026-05-14T05:56:39Z",
+        "name": "data-snapshot-20260709-1407.json",
+        "sha256": "f6258115886a83b35589bfc55d0bb41efc2ab9ce3195c1517674df0aa4be9b00",
+        "bytes": 1496,
+        "updated_at": "2026-07-09T14:08:46Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260514-0555.output1-latest.parquet",
-        "sha256": "94665b59565b67a515b7fac5ad7de17ef7727f9d16501cf874d42b0aa2a9ca6d",
-        "bytes": 1663965,
-        "updated_at": "2026-05-14T05:56:39Z",
+        "name": "data-snapshot-20260709-1407.output1-latest.parquet",
+        "sha256": "fef7b7192633ffcf56b8dabbfa3dc99c9a2d37a366230bfa5fe5455474f83fe0",
+        "bytes": 83078,
+        "updated_at": "2026-07-09T14:08:46Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260514-0555.parquet",
-        "sha256": "f57700c270a042d6cd4d05b63783486acd3cde7686ca1312cea04cf3795dc7a4",
-        "bytes": 141684088,
-        "updated_at": "2026-05-14T05:56:39Z",
+        "name": "data-snapshot-20260709-1407.parquet",
+        "sha256": "16b9e700eac9c03e8ec059f62fdef88c251b307c1075c583f8c06b79036d92c1",
+        "bytes": 144561882,
+        "updated_at": "2026-07-09T14:08:46Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260514-0555.sha256",
-        "sha256": "4163279e4396c51c95fda53e9b64fea580366556925dcc2fe460a885d9ef8992",
+        "name": "data-snapshot-20260709-1407.sha256",
+        "sha256": "80a3e1f2d20a69c7a55f96ebae10c920c0bc5d9520c3f4d912428c264fb78fb9",
         "bytes": 65,
-        "updated_at": "2026-05-14T05:56:39Z",
+        "updated_at": "2026-07-09T14:08:46Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260514-0555.ticker-state.parquet",
-        "sha256": "f19895adb2ce771c4388953ffb0566bd7e8f9c125d99237fb83158d30a24f4fd",
-        "bytes": 192835,
-        "updated_at": "2026-05-14T05:56:39Z",
+        "name": "data-snapshot-20260709-1407.ticker-state.parquet",
+        "sha256": "4fb7953c26471a79ef3fd234a3b6cbccb6323de83b4e038a78c4349a8e1d3e48",
+        "bytes": 191664,
+        "updated_at": "2026-07-09T14:08:46Z",
         "release_type": "snapshot"
       }
     ]
@@ -60,10 +60,435 @@
     "assets": []
   },
   "release_type": "snapshot",
-  "row_count": 7164712,
-  "created_at": "2026-05-14T05:56:39Z",
+  "row_count": 7327403,
+  "created_at": "2026-07-09T14:08:46Z",
   "history": {
     "release_tags": [
+      {
+        "tag": "data-snapshot-20260709-1407",
+        "release_type": "snapshot",
+        "created_at": "2026-07-09T14:08:46Z"
+      },
+      {
+        "tag": "data-snapshot-20260709-0627",
+        "release_type": "snapshot",
+        "created_at": "2026-07-09T06:28:29Z"
+      },
+      {
+        "tag": "data-snapshot-20260708-0527",
+        "release_type": "snapshot",
+        "created_at": "2026-07-08T05:28:17Z"
+      },
+      {
+        "tag": "data-snapshot-20260707-0608",
+        "release_type": "snapshot",
+        "created_at": "2026-07-07T06:09:26Z"
+      },
+      {
+        "tag": "data-snapshot-20260706-1444",
+        "release_type": "snapshot",
+        "created_at": "2026-07-06T14:44:37Z"
+      },
+      {
+        "tag": "data-snapshot-20260706-0635",
+        "release_type": "snapshot",
+        "created_at": "2026-07-06T06:36:36Z"
+      },
+      {
+        "tag": "data-snapshot-20260706-0718",
+        "release_type": "snapshot",
+        "created_at": "2026-07-05T22:19:11Z"
+      },
+      {
+        "tag": "data-snapshot-20260703-1321",
+        "release_type": "snapshot",
+        "created_at": "2026-07-03T13:22:12Z"
+      },
+      {
+        "tag": "data-snapshot-20260703-0547",
+        "release_type": "snapshot",
+        "created_at": "2026-07-03T05:48:42Z"
+      },
+      {
+        "tag": "data-snapshot-20260702-1317",
+        "release_type": "snapshot",
+        "created_at": "2026-07-02T13:18:33Z"
+      },
+      {
+        "tag": "data-snapshot-20260702-0606",
+        "release_type": "snapshot",
+        "created_at": "2026-07-02T06:07:44Z"
+      },
+      {
+        "tag": "data-snapshot-20260701-1349",
+        "release_type": "snapshot",
+        "created_at": "2026-07-01T13:50:41Z"
+      },
+      {
+        "tag": "data-snapshot-20260701-0637",
+        "release_type": "snapshot",
+        "created_at": "2026-07-01T06:38:25Z"
+      },
+      {
+        "tag": "data-snapshot-20260630-1325",
+        "release_type": "snapshot",
+        "created_at": "2026-06-30T13:25:54Z"
+      },
+      {
+        "tag": "data-snapshot-20260630-0626",
+        "release_type": "snapshot",
+        "created_at": "2026-06-30T06:27:10Z"
+      },
+      {
+        "tag": "data-snapshot-20260629-1501",
+        "release_type": "snapshot",
+        "created_at": "2026-06-29T15:02:08Z"
+      },
+      {
+        "tag": "data-snapshot-20260629-0702",
+        "release_type": "snapshot",
+        "created_at": "2026-06-29T07:03:34Z"
+      },
+      {
+        "tag": "data-snapshot-20260629-0736",
+        "release_type": "snapshot",
+        "created_at": "2026-06-28T22:37:03Z"
+      },
+      {
+        "tag": "data-snapshot-20260626-0550",
+        "release_type": "snapshot",
+        "created_at": "2026-06-26T05:51:51Z"
+      },
+      {
+        "tag": "data-snapshot-20260626-0046",
+        "release_type": "snapshot",
+        "created_at": "2026-06-26T00:47:46Z"
+      },
+      {
+        "tag": "data-snapshot-20260624-1337",
+        "release_type": "snapshot",
+        "created_at": "2026-06-24T13:38:45Z"
+      },
+      {
+        "tag": "data-snapshot-20260624-0602",
+        "release_type": "snapshot",
+        "created_at": "2026-06-24T06:03:12Z"
+      },
+      {
+        "tag": "data-snapshot-20260623-0617",
+        "release_type": "snapshot",
+        "created_at": "2026-06-23T06:17:49Z"
+      },
+      {
+        "tag": "data-snapshot-20260622-1722",
+        "release_type": "snapshot",
+        "created_at": "2026-06-22T17:23:44Z"
+      },
+      {
+        "tag": "data-snapshot-20260622-0732",
+        "release_type": "snapshot",
+        "created_at": "2026-06-22T07:33:15Z"
+      },
+      {
+        "tag": "data-snapshot-20260622-0731",
+        "release_type": "snapshot",
+        "created_at": "2026-06-21T22:32:26Z"
+      },
+      {
+        "tag": "data-snapshot-20260619-1430",
+        "release_type": "snapshot",
+        "created_at": "2026-06-19T14:31:23Z"
+      },
+      {
+        "tag": "data-snapshot-20260619-0727",
+        "release_type": "snapshot",
+        "created_at": "2026-06-19T07:27:55Z"
+      },
+      {
+        "tag": "data-snapshot-20260618-1432",
+        "release_type": "snapshot",
+        "created_at": "2026-06-18T14:33:37Z"
+      },
+      {
+        "tag": "data-snapshot-20260618-0654",
+        "release_type": "snapshot",
+        "created_at": "2026-06-18T06:55:50Z"
+      },
+      {
+        "tag": "data-snapshot-20260617-1438",
+        "release_type": "snapshot",
+        "created_at": "2026-06-17T14:39:31Z"
+      },
+      {
+        "tag": "data-snapshot-20260617-0722",
+        "release_type": "snapshot",
+        "created_at": "2026-06-17T07:23:33Z"
+      },
+      {
+        "tag": "data-snapshot-20260616-1740",
+        "release_type": "snapshot",
+        "created_at": "2026-06-16T17:41:49Z"
+      },
+      {
+        "tag": "data-snapshot-20260616-0755",
+        "release_type": "snapshot",
+        "created_at": "2026-06-16T07:56:25Z"
+      },
+      {
+        "tag": "data-snapshot-20260615-1738",
+        "release_type": "snapshot",
+        "created_at": "2026-06-15T17:39:05Z"
+      },
+      {
+        "tag": "data-snapshot-20260615-0742",
+        "release_type": "snapshot",
+        "created_at": "2026-06-15T07:43:13Z"
+      },
+      {
+        "tag": "data-snapshot-20260615-0726",
+        "release_type": "snapshot",
+        "created_at": "2026-06-14T22:27:14Z"
+      },
+      {
+        "tag": "data-snapshot-20260612-1425",
+        "release_type": "snapshot",
+        "created_at": "2026-06-12T14:26:01Z"
+      },
+      {
+        "tag": "data-snapshot-20260612-0657",
+        "release_type": "snapshot",
+        "created_at": "2026-06-12T06:58:32Z"
+      },
+      {
+        "tag": "data-snapshot-20260611-1504",
+        "release_type": "snapshot",
+        "created_at": "2026-06-11T15:05:44Z"
+      },
+      {
+        "tag": "data-snapshot-20260611-0650",
+        "release_type": "snapshot",
+        "created_at": "2026-06-11T06:51:43Z"
+      },
+      {
+        "tag": "data-snapshot-20260610-1439",
+        "release_type": "snapshot",
+        "created_at": "2026-06-10T14:40:15Z"
+      },
+      {
+        "tag": "data-snapshot-20260610-0645",
+        "release_type": "snapshot",
+        "created_at": "2026-06-10T06:45:58Z"
+      },
+      {
+        "tag": "data-snapshot-20260609-1933",
+        "release_type": "snapshot",
+        "created_at": "2026-06-09T19:34:29Z"
+      },
+      {
+        "tag": "data-snapshot-20260609-0630",
+        "release_type": "snapshot",
+        "created_at": "2026-06-09T06:31:05Z"
+      },
+      {
+        "tag": "data-snapshot-20260608-1501",
+        "release_type": "snapshot",
+        "created_at": "2026-06-08T15:01:55Z"
+      },
+      {
+        "tag": "data-snapshot-20260608-0705",
+        "release_type": "snapshot",
+        "created_at": "2026-06-08T07:06:06Z"
+      },
+      {
+        "tag": "data-snapshot-20260608-0718",
+        "release_type": "snapshot",
+        "created_at": "2026-06-07T22:18:59Z"
+      },
+      {
+        "tag": "data-snapshot-20260605-1411",
+        "release_type": "snapshot",
+        "created_at": "2026-06-05T14:12:49Z"
+      },
+      {
+        "tag": "data-snapshot-20260605-0644",
+        "release_type": "snapshot",
+        "created_at": "2026-06-05T06:45:14Z"
+      },
+      {
+        "tag": "data-snapshot-20260604-1419",
+        "release_type": "snapshot",
+        "created_at": "2026-06-04T14:20:37Z"
+      },
+      {
+        "tag": "data-snapshot-20260604-0653",
+        "release_type": "snapshot",
+        "created_at": "2026-06-04T06:54:38Z"
+      },
+      {
+        "tag": "data-snapshot-20260603-1727",
+        "release_type": "snapshot",
+        "created_at": "2026-06-03T17:28:19Z"
+      },
+      {
+        "tag": "data-snapshot-20260603-0759",
+        "release_type": "snapshot",
+        "created_at": "2026-06-03T08:00:27Z"
+      },
+      {
+        "tag": "data-snapshot-20260602-1652",
+        "release_type": "snapshot",
+        "created_at": "2026-06-02T16:52:57Z"
+      },
+      {
+        "tag": "data-snapshot-20260602-0659",
+        "release_type": "snapshot",
+        "created_at": "2026-06-02T06:59:57Z"
+      },
+      {
+        "tag": "data-snapshot-20260601-1803",
+        "release_type": "snapshot",
+        "created_at": "2026-06-01T18:04:35Z"
+      },
+      {
+        "tag": "data-snapshot-20260601-0711",
+        "release_type": "snapshot",
+        "created_at": "2026-06-01T07:12:22Z"
+      },
+      {
+        "tag": "data-snapshot-20260601-0716",
+        "release_type": "snapshot",
+        "created_at": "2026-05-31T22:16:45Z"
+      },
+      {
+        "tag": "data-snapshot-20260529-1424",
+        "release_type": "snapshot",
+        "created_at": "2026-05-29T14:25:02Z"
+      },
+      {
+        "tag": "data-snapshot-20260529-0636",
+        "release_type": "snapshot",
+        "created_at": "2026-05-29T06:37:13Z"
+      },
+      {
+        "tag": "data-snapshot-20260528-1454",
+        "release_type": "snapshot",
+        "created_at": "2026-05-28T14:55:31Z"
+      },
+      {
+        "tag": "data-snapshot-20260528-0634",
+        "release_type": "snapshot",
+        "created_at": "2026-05-28T06:35:15Z"
+      },
+      {
+        "tag": "data-snapshot-20260527-1442",
+        "release_type": "snapshot",
+        "created_at": "2026-05-27T14:43:36Z"
+      },
+      {
+        "tag": "data-snapshot-20260527-0640",
+        "release_type": "snapshot",
+        "created_at": "2026-05-27T06:41:04Z"
+      },
+      {
+        "tag": "data-snapshot-20260526-1418",
+        "release_type": "snapshot",
+        "created_at": "2026-05-26T14:19:47Z"
+      },
+      {
+        "tag": "data-snapshot-20260526-0614",
+        "release_type": "snapshot",
+        "created_at": "2026-05-26T06:15:01Z"
+      },
+      {
+        "tag": "data-snapshot-20260525-1540",
+        "release_type": "snapshot",
+        "created_at": "2026-05-25T15:41:06Z"
+      },
+      {
+        "tag": "data-snapshot-20260525-0726",
+        "release_type": "snapshot",
+        "created_at": "2026-05-25T07:27:25Z"
+      },
+      {
+        "tag": "data-snapshot-20260525-0715",
+        "release_type": "snapshot",
+        "created_at": "2026-05-24T22:16:18Z"
+      },
+      {
+        "tag": "data-snapshot-20260522-1347",
+        "release_type": "snapshot",
+        "created_at": "2026-05-22T13:48:37Z"
+      },
+      {
+        "tag": "data-snapshot-20260522-0620",
+        "release_type": "snapshot",
+        "created_at": "2026-05-22T06:21:45Z"
+      },
+      {
+        "tag": "data-snapshot-20260521-1430",
+        "release_type": "snapshot",
+        "created_at": "2026-05-21T14:31:22Z"
+      },
+      {
+        "tag": "data-snapshot-20260521-0620",
+        "release_type": "snapshot",
+        "created_at": "2026-05-21T06:21:24Z"
+      },
+      {
+        "tag": "data-snapshot-20260520-1355",
+        "release_type": "snapshot",
+        "created_at": "2026-05-20T13:56:29Z"
+      },
+      {
+        "tag": "data-snapshot-20260520-0625",
+        "release_type": "snapshot",
+        "created_at": "2026-05-20T06:26:04Z"
+      },
+      {
+        "tag": "data-snapshot-20260519-1415",
+        "release_type": "snapshot",
+        "created_at": "2026-05-19T14:16:22Z"
+      },
+      {
+        "tag": "data-snapshot-20260519-0615",
+        "release_type": "snapshot",
+        "created_at": "2026-05-19T06:16:25Z"
+      },
+      {
+        "tag": "data-snapshot-20260518-1447",
+        "release_type": "snapshot",
+        "created_at": "2026-05-18T14:48:37Z"
+      },
+      {
+        "tag": "data-snapshot-20260518-0617",
+        "release_type": "snapshot",
+        "created_at": "2026-05-18T06:18:48Z"
+      },
+      {
+        "tag": "data-snapshot-20260518-0010",
+        "release_type": "snapshot",
+        "created_at": "2026-05-18T00:11:21Z"
+      },
+      {
+        "tag": "data-snapshot-20260518-0716",
+        "release_type": "snapshot",
+        "created_at": "2026-05-17T22:17:18Z"
+      },
+      {
+        "tag": "data-snapshot-20260515-1314",
+        "release_type": "snapshot",
+        "created_at": "2026-05-15T13:15:14Z"
+      },
+      {
+        "tag": "data-snapshot-20260515-0553",
+        "release_type": "snapshot",
+        "created_at": "2026-05-15T05:54:29Z"
+      },
+      {
+        "tag": "data-snapshot-20260514-1315",
+        "release_type": "snapshot",
+        "created_at": "2026-05-14T13:16:07Z"
+      },
       {
         "tag": "data-snapshot-20260514-0555",
         "release_type": "snapshot",
@@ -238,306 +663,6 @@
         "tag": "data-snapshot-20260422-1219",
         "release_type": "snapshot",
         "created_at": "2026-04-22T12:19:54Z"
-      },
-      {
-        "tag": "data-snapshot-20260422-0512",
-        "release_type": "snapshot",
-        "created_at": "2026-04-22T05:13:47Z"
-      },
-      {
-        "tag": "data-snapshot-20260421-1218",
-        "release_type": "snapshot",
-        "created_at": "2026-04-21T12:19:46Z"
-      },
-      {
-        "tag": "data-snapshot-20260421-0512",
-        "release_type": "snapshot",
-        "created_at": "2026-04-21T05:13:31Z"
-      },
-      {
-        "tag": "data-snapshot-20260420-1224",
-        "release_type": "snapshot",
-        "created_at": "2026-04-20T12:24:53Z"
-      },
-      {
-        "tag": "data-snapshot-20260420-0531",
-        "release_type": "snapshot",
-        "created_at": "2026-04-20T05:31:57Z"
-      },
-      {
-        "tag": "data-snapshot-20260420-0654",
-        "release_type": "snapshot",
-        "created_at": "2026-04-19T21:55:06Z"
-      },
-      {
-        "tag": "data-snapshot-20260417-1214",
-        "release_type": "snapshot",
-        "created_at": "2026-04-17T12:15:15Z"
-      },
-      {
-        "tag": "data-snapshot-20260417-0529",
-        "release_type": "snapshot",
-        "created_at": "2026-04-17T05:30:32Z"
-      },
-      {
-        "tag": "data-snapshot-20260416-1219",
-        "release_type": "snapshot",
-        "created_at": "2026-04-16T12:19:53Z"
-      },
-      {
-        "tag": "data-snapshot-20260416-0606",
-        "release_type": "snapshot",
-        "created_at": "2026-04-16T06:07:10Z"
-      },
-      {
-        "tag": "data-snapshot-20260416-1016",
-        "release_type": "snapshot",
-        "created_at": "2026-04-16T01:16:28Z"
-      },
-      {
-        "tag": "data-snapshot-20260415-1217",
-        "release_type": "snapshot",
-        "created_at": "2026-04-15T12:17:52Z"
-      },
-      {
-        "tag": "data-snapshot-20260415-0435",
-        "release_type": "snapshot",
-        "created_at": "2026-04-15T04:36:25Z"
-      },
-      {
-        "tag": "data-snapshot-20260415-0343",
-        "release_type": "snapshot",
-        "created_at": "2026-04-15T03:44:14Z"
-      },
-      {
-        "tag": "data-snapshot-20260414-0624",
-        "release_type": "snapshot",
-        "created_at": "2026-04-14T06:25:44Z"
-      },
-      {
-        "tag": "data-snapshot-20260413-1220",
-        "release_type": "snapshot",
-        "created_at": "2026-04-13T12:21:15Z"
-      },
-      {
-        "tag": "data-snapshot-20260413-0618",
-        "release_type": "snapshot",
-        "created_at": "2026-04-13T06:19:53Z"
-      },
-      {
-        "tag": "data-snapshot-20260413-0700",
-        "release_type": "snapshot",
-        "created_at": "2026-04-12T22:01:11Z"
-      },
-      {
-        "tag": "data-snapshot-20260410-1210",
-        "release_type": "snapshot",
-        "created_at": "2026-04-10T12:11:52Z"
-      },
-      {
-        "tag": "data-snapshot-20260410-0642",
-        "release_type": "snapshot",
-        "created_at": "2026-04-10T06:44:12Z"
-      },
-      {
-        "tag": "data-snapshot-20260409-1213",
-        "release_type": "snapshot",
-        "created_at": "2026-04-09T12:14:53Z"
-      },
-      {
-        "tag": "data-snapshot-20260409-0641",
-        "release_type": "snapshot",
-        "created_at": "2026-04-09T06:43:22Z"
-      },
-      {
-        "tag": "data-snapshot-20260408-1212",
-        "release_type": "snapshot",
-        "created_at": "2026-04-08T12:13:32Z"
-      },
-      {
-        "tag": "data-snapshot-20260408-0541",
-        "release_type": "snapshot",
-        "created_at": "2026-04-08T05:43:02Z"
-      },
-      {
-        "tag": "data-snapshot-20260407-1212",
-        "release_type": "snapshot",
-        "created_at": "2026-04-07T12:13:36Z"
-      },
-      {
-        "tag": "data-snapshot-20260407-0545",
-        "release_type": "snapshot",
-        "created_at": "2026-04-07T05:46:44Z"
-      },
-      {
-        "tag": "data-snapshot-20260406-1208",
-        "release_type": "snapshot",
-        "created_at": "2026-04-06T12:09:53Z"
-      },
-      {
-        "tag": "data-snapshot-20260406-0615",
-        "release_type": "snapshot",
-        "created_at": "2026-04-06T06:16:39Z"
-      },
-      {
-        "tag": "data-snapshot-20260406-0653",
-        "release_type": "snapshot",
-        "created_at": "2026-04-05T21:53:48Z"
-      },
-      {
-        "tag": "data-snapshot-20260403-1203",
-        "release_type": "snapshot",
-        "created_at": "2026-04-03T12:04:37Z"
-      },
-      {
-        "tag": "data-snapshot-20260403-0559",
-        "release_type": "snapshot",
-        "created_at": "2026-04-03T06:00:29Z"
-      },
-      {
-        "tag": "data-snapshot-20260402-1208",
-        "release_type": "snapshot",
-        "created_at": "2026-04-02T12:09:44Z"
-      },
-      {
-        "tag": "data-snapshot-20260402-0557",
-        "release_type": "snapshot",
-        "created_at": "2026-04-02T05:58:50Z"
-      },
-      {
-        "tag": "data-snapshot-20260401-1210",
-        "release_type": "snapshot",
-        "created_at": "2026-04-01T12:12:02Z"
-      },
-      {
-        "tag": "data-snapshot-20260401-0611",
-        "release_type": "snapshot",
-        "created_at": "2026-04-01T06:12:09Z"
-      },
-      {
-        "tag": "data-snapshot-20260331-1209",
-        "release_type": "snapshot",
-        "created_at": "2026-03-31T12:11:13Z"
-      },
-      {
-        "tag": "data-snapshot-20260331-0559",
-        "release_type": "snapshot",
-        "created_at": "2026-03-31T06:00:32Z"
-      },
-      {
-        "tag": "data-snapshot-20260330-1214",
-        "release_type": "snapshot",
-        "created_at": "2026-03-30T12:15:23Z"
-      },
-      {
-        "tag": "data-snapshot-20260330-0437",
-        "release_type": "snapshot",
-        "created_at": "2026-03-30T04:38:18Z"
-      },
-      {
-        "tag": "data-snapshot-20260330-1020",
-        "release_type": "snapshot",
-        "created_at": "2026-03-30T02:47:17Z"
-      },
-      {
-        "tag": "data-snapshot-20260330-0653",
-        "release_type": "snapshot",
-        "created_at": "2026-03-29T21:53:46Z"
-      },
-      {
-        "tag": "data-snapshot-20260327-1206",
-        "release_type": "snapshot",
-        "created_at": "2026-03-27T12:07:56Z"
-      },
-      {
-        "tag": "data-snapshot-20260327-0545",
-        "release_type": "snapshot",
-        "created_at": "2026-03-27T05:46:21Z"
-      },
-      {
-        "tag": "data-snapshot-20260326-1209",
-        "release_type": "snapshot",
-        "created_at": "2026-03-26T12:10:54Z"
-      },
-      {
-        "tag": "data-snapshot-20260326-0614",
-        "release_type": "snapshot",
-        "created_at": "2026-03-26T06:15:32Z"
-      },
-      {
-        "tag": "data-snapshot-20260325-1207",
-        "release_type": "snapshot",
-        "created_at": "2026-03-25T12:08:26Z"
-      },
-      {
-        "tag": "data-snapshot-20260325-0608",
-        "release_type": "snapshot",
-        "created_at": "2026-03-25T06:09:51Z"
-      },
-      {
-        "tag": "data-snapshot-20260324-1206",
-        "release_type": "snapshot",
-        "created_at": "2026-03-24T12:08:01Z"
-      },
-      {
-        "tag": "data-snapshot-20260324-0547",
-        "release_type": "snapshot",
-        "created_at": "2026-03-24T05:48:46Z"
-      },
-      {
-        "tag": "data-snapshot-20260324-0756",
-        "release_type": "snapshot",
-        "created_at": "2026-03-23T22:57:32Z"
-      },
-      {
-        "tag": "data-snapshot-20260323-1203",
-        "release_type": "snapshot",
-        "created_at": "2026-03-23T12:05:06Z"
-      },
-      {
-        "tag": "data-snapshot-20260323-2054",
-        "release_type": "snapshot",
-        "created_at": "2026-03-23T11:54:59Z"
-      },
-      {
-        "tag": "data-snapshot-20260323-0532",
-        "release_type": "snapshot",
-        "created_at": "2026-03-23T05:33:42Z"
-      },
-      {
-        "tag": "data-snapshot-20260320-0845",
-        "release_type": "snapshot",
-        "created_at": "2026-03-20T08:47:17Z"
-      },
-      {
-        "tag": "data-snapshot-20260319-1014",
-        "release_type": "snapshot",
-        "created_at": "2026-03-19T10:15:57Z"
-      },
-      {
-        "tag": "data-snapshot-20260319-0807",
-        "release_type": "snapshot",
-        "created_at": "2026-03-19T08:09:11Z"
-      },
-      {
-        "tag": "data-snapshot-20260319-0016",
-        "release_type": "snapshot",
-        "created_at": "2026-03-19T00:17:45Z"
-      },
-      {
-        "tag": "data-snapshot-20260318-1108",
-        "release_type": "snapshot",
-        "created_at": "2026-03-18T11:09:26Z"
-      },
-      {
-        "tag": "data-snapshot-20260318-0932",
-        "release_type": "snapshot",
-        "created_at": "2026-03-18T09:33:30Z"
-      },
-      {
-        "tag": "data-snapshot-20260317-1338",
-        "release_type": "snapshot",
-        "created_at": "2026-03-17T23:42:03Z"
       }
     ],
     "delta_tags": []
