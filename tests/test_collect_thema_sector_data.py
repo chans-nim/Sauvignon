@@ -27,6 +27,7 @@ from scripts.collect_thema_sector_data import (
     _render_theme_report_html,
     _resolve_classification_json,
 )
+from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files
 
 
 def test_build_thema_rows_and_render_html() -> None:
@@ -721,3 +722,99 @@ def test_calculate_breadth_score_basic() -> None:
     )
     assert out["breadth_score"] is not None
     assert out["relative_up_ratio"] == 0.2
+
+
+def test_load_theme_history_rows_reads_combined_and_daily_snapshots(tmp_path) -> None:
+    (tmp_path / "theme_history_snapshot.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-06-09",
+                "rows": [
+                    {
+                        "date": "2026-06-09",
+                        "group_type": "major",
+                        "major_category": "Old",
+                        "leader_status": "二쇰룄",
+                        "theme_rs": 70.0,
+                        "theme_rank": 1,
+                    }
+                ],
+                "metric_rows": [
+                    {
+                        "date": "2026-06-09",
+                        "group_type": "major",
+                        "major_category": "Old",
+                        "leader_status": "二쇰룄",
+                        "theme_rs": 70.0,
+                        "theme_rank": 1,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "theme_snapshot_20260708.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-07-08",
+                "rows": [
+                    {
+                        "date": "2026-07-08",
+                        "group_type": "major",
+                        "major_category": "Recent",
+                        "leader_status": "二쇰룄",
+                        "theme_rs": 80.0,
+                        "theme_rank": 1,
+                    }
+                ],
+                "metric_rows": [
+                    {
+                        "date": "2026-07-08",
+                        "group_type": "major",
+                        "major_category": "Recent",
+                        "leader_status": "二쇰룄",
+                        "theme_rs": 80.0,
+                        "theme_rank": 1,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    rows = _load_theme_history_rows(tmp_path)
+
+    assert {r["date"] for r in rows} == {"2026-06-09", "2026-07-08"}
+
+
+def test_expand_combined_snapshot_to_daily_files(tmp_path) -> None:
+    combined = tmp_path / "theme_history_snapshot.json"
+    combined.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "date": "2026-07-09",
+                "rows": [
+                    {"date": "2026-07-08", "group_type": "major", "major_category": "A", "leader_status": "二쇰룄"},
+                    {"date": "2026-07-09", "group_type": "major", "major_category": "B", "leader_status": "二쇰룄"},
+                ],
+                "metric_rows": [
+                    {"date": "2026-07-08", "group_type": "major", "major_category": "A", "leader_status": "二쇰룄"},
+                    {"date": "2026-07-09", "group_type": "major", "major_category": "B", "leader_status": "二쇰룄"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    dest = tmp_path / "dest"
+
+    written = expand_combined_snapshot_to_daily_files(combined, dest)
+
+    assert {p.name for p in written} == {"theme_snapshot_20260708.json", "theme_snapshot_20260709.json"}
+    payload = json.loads((dest / "theme_snapshot_20260709.json").read_text(encoding="utf-8"))
+    assert payload["date"] == "2026-07-09"
+    assert payload["rows"][0]["major_category"] == "B"
+    assert payload["metric_rows"][0]["major_category"] == "B"

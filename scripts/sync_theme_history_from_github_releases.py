@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import requests
@@ -103,6 +104,52 @@ def pick_theme_snapshot_asset(assets: list) -> dict | None:
         names = ", ".join(sorted(str(a.get("name")) for a in matches))
         raise SystemExit(f"Expected one {THEME_SNAPSHOT_GLOB} asset, got: {names}")
     return matches[0]
+
+
+def _date_yyyymmdd(date_yyyy_mm_dd: str) -> str:
+    return str(date_yyyy_mm_dd).strip().replace("-", "")[:8]
+
+
+def _rows_by_date(rows: list) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        d = str(row.get("date") or "").strip()
+        if not d:
+            continue
+        out.setdefault(d, []).append(row)
+    return out
+
+
+def expand_combined_snapshot_to_daily_files(combined_path: Path, dest_dir: Path) -> list[Path]:
+    """
+    A release's theme_history_snapshot.json contains many dates. Store it as
+    theme_snapshot_YYYYMMDD.json files so multiple release downloads do not
+    overwrite each other under the same combined asset name.
+    """
+    payload = json.loads(Path(combined_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return []
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    rows_by_date = _rows_by_date(list(payload.get("rows") or []))
+    metric_by_date = _rows_by_date(list(payload.get("metric_rows") or []))
+    dates = sorted(set(rows_by_date) | set(metric_by_date))
+    written: list[Path] = []
+    for d in dates:
+        out_payload = {
+            "schema_version": payload.get("schema_version", 2),
+            "date": d,
+            "rows": rows_by_date.get(d, []),
+        }
+        if "metric_rows" in payload:
+            out_payload["metric_rows"] = metric_by_date.get(d, [])
+        out_path = Path(dest_dir) / f"theme_snapshot_{_date_yyyymmdd(d)}.json"
+        out_path.write_text(json.dumps(out_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        written.append(out_path)
+    return written
 
 
 def _normalize_explicit_prefix(raw: str | None) -> str | None:
@@ -204,9 +251,19 @@ def sync_theme_snapshots(
             print(f"[sync-theme-history] skip {tag}: no {THEME_HISTORY_SNAPSHOT_ASSET} / {THEME_SNAPSHOT_GLOB}")
             continue
         name = str(snap.get("name") or "")
-        dest = dest_dir / name
-        download_asset_by_api(repo, snap, dest)
-        print(f"[sync-theme-history] {tag} -> {dest.name}")
+        if name == THEME_HISTORY_SNAPSHOT_ASSET:
+            with tempfile.TemporaryDirectory(prefix="theme-history-asset-") as td:
+                tmp_path = Path(td) / name
+                download_asset_by_api(repo, snap, tmp_path)
+                written = expand_combined_snapshot_to_daily_files(tmp_path, dest_dir)
+            print(
+                f"[sync-theme-history] {tag} -> {THEME_HISTORY_SNAPSHOT_ASSET} "
+                f"expanded to {len(written)} daily snapshot(s)"
+            )
+        else:
+            dest = dest_dir / name
+            download_asset_by_api(repo, snap, dest)
+            print(f"[sync-theme-history] {tag} -> {dest.name}")
         n += 1
     return n
 

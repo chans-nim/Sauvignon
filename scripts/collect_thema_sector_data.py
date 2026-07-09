@@ -407,10 +407,12 @@ def _read_theme_history_snapshot_rows(path: Path, *, leaders_only: bool = False)
 
 def _theme_history_source_files(history_dir: Path) -> list[Path]:
     hd = Path(history_dir)
+    files: list[Path] = []
     combined = _theme_history_combined_snapshot_path(hd)
     if combined.is_file():
-        return [combined]
-    return sorted(hd.glob("theme_snapshot_*.json"), key=lambda p: p.name)
+        files.append(combined)
+    files.extend(sorted(hd.glob("theme_snapshot_*.json"), key=lambda p: p.name))
+    return files
 
 
 def _theme_history_row_key(r: dict[str, Any]) -> tuple[str, str, str, str, str]:
