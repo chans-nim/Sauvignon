@@ -34,6 +34,8 @@ from scripts.theme_sector_release_lib import (  # noqa: E402
 )
 
 THEME_SNAPSHOT_GLOB = "theme_snapshot_*.json"
+OVERVIEW_ASSET = "overview.json"
+THEME_HISTORY_FALLBACK_LEADER_COUNT = 3
 
 
 def parse_repo_from_url(repo_or_url: str) -> str:
@@ -106,8 +108,46 @@ def pick_theme_snapshot_asset(assets: list) -> dict | None:
     return matches[0]
 
 
+def pick_asset_by_name(assets: list, name: str) -> dict | None:
+    matches = [
+        a
+        for a in assets
+        if isinstance(a, dict) and str(a.get("name") or "") == str(name)
+    ]
+    if len(matches) > 1:
+        raise SystemExit(f"Expected one {name} asset")
+    return matches[0] if matches else None
+
+
 def _date_yyyymmdd(date_yyyy_mm_dd: str) -> str:
     return str(date_yyyy_mm_dd).strip().replace("-", "")[:8]
+
+
+def _norm_stock_symbol(raw: object) -> str:
+    s = str(raw or "").strip()
+    return s.zfill(6) if s.isdigit() else s
+
+
+def _parse_iso_date(s: object) -> str | None:
+    st = str(s or "").strip()
+    if len(st) >= 10 and st[4] == "-" and st[7] == "-":
+        return st[:10]
+    return None
+
+
+def _history_display_path_from_row(r: dict) -> str:
+    dp = str(r.get("display_path") or "").strip()
+    if dp:
+        return dp
+    major = str(r.get("major_category") or "").strip()
+    middle = r.get("middle_category")
+    gt = str(r.get("group_type") or "")
+    if gt == "major":
+        return major or "-"
+    mid = "" if middle is None else str(middle).strip()
+    if major and mid:
+        return f"{major} > {mid}"
+    return major or mid or "-"
 
 
 def _rows_by_date(rows: list) -> dict[str, list[dict]]:
@@ -122,7 +162,7 @@ def _rows_by_date(rows: list) -> dict[str, list[dict]]:
     return out
 
 
-def expand_combined_snapshot_to_daily_files(combined_path: Path, dest_dir: Path) -> list[Path]:
+def expand_combined_snapshot_to_daily_files(combined_path: Path, dest_dir: Path, *, overwrite: bool = True) -> list[Path]:
     """
     A release's theme_history_snapshot.json contains many dates. Store it as
     theme_snapshot_YYYYMMDD.json files so multiple release downloads do not
@@ -147,9 +187,94 @@ def expand_combined_snapshot_to_daily_files(combined_path: Path, dest_dir: Path)
         if "metric_rows" in payload:
             out_payload["metric_rows"] = metric_by_date.get(d, [])
         out_path = Path(dest_dir) / f"theme_snapshot_{_date_yyyymmdd(d)}.json"
+        if out_path.exists() and not overwrite:
+            continue
         out_path.write_text(json.dumps(out_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         written.append(out_path)
     return written
+
+
+def _history_row_from_overview_row(row: dict, date_yyyy_mm_dd: str) -> dict:
+    a = dict(row.get("analysis") or {})
+    top_stocks: list[dict] = []
+    for stock in list(row.get("major_stocks") or [])[:1]:
+        if not isinstance(stock, dict):
+            continue
+        sym = _norm_stock_symbol(stock.get("symbol"))
+        if not sym:
+            continue
+        top_stocks.append({"symbol": sym, "name": str(stock.get("name") or "").strip(), "rs": stock.get("rs")})
+    return {
+        "date": date_yyyy_mm_dd,
+        "group_type": str(row.get("group_type") or ""),
+        "major_category": row.get("major_category"),
+        "middle_category": row.get("middle_category"),
+        "display_path": _history_display_path_from_row(row),
+        "theme_rs": float(a.get("relative_strength_score") or 0.0),
+        "theme_rank": int(a.get("relative_strength_rank") or 0),
+        "member_count": int(a.get("member_count") or 0),
+        "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(a.get("total_value_traded") or 0.0),
+        "up_ratio": float(a.get("up_ratio") or 0.0),
+        "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
+        "leader_status": "주도",
+        "source_leader_status": str(a.get("leader_status") or ""),
+        "leader_top_stocks": top_stocks,
+    }
+
+
+def _metric_row_from_overview_row(row: dict, date_yyyy_mm_dd: str) -> dict:
+    a = dict(row.get("analysis") or {})
+    return {
+        "date": date_yyyy_mm_dd,
+        "group_type": str(row.get("group_type") or ""),
+        "major_category": row.get("major_category"),
+        "middle_category": row.get("middle_category"),
+        "display_path": _history_display_path_from_row(row),
+        "theme_rs": float(a.get("relative_strength_score") or 0.0),
+        "theme_rank": int(a.get("relative_strength_rank") or 0),
+        "member_count": int(a.get("member_count") or 0),
+        "top_members_value_sum": float(a.get("top_members_value_sum") or 0.0),
+        "total_value_traded": float(a.get("total_value_traded") or 0.0),
+        "up_ratio": float(a.get("up_ratio") or 0.0),
+        "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
+        "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
+        "leader_status": str(a.get("leader_status") or ""),
+    }
+
+
+def write_daily_snapshot_from_overview(overview_path: Path, dest_dir: Path) -> Path | None:
+    payload = json.loads(Path(overview_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    meta = dict(payload.get("metadata") or {})
+    snap_date = str(meta.get("theme_snapshot_date") or "").strip() or _parse_iso_date(meta.get("collected_at")) or ""
+    if not snap_date:
+        return None
+    rows = [r for r in list(payload.get("major_rows") or []) + list(payload.get("middle_rows") or []) if isinstance(r, dict)]
+    leaders = [r for r in rows if dict(r.get("analysis") or {}).get("leader_status") == "주도"]
+    selected = leaders
+    if not selected:
+        selected = sorted(
+            rows,
+            key=lambda r: (
+                -float(dict(r.get("analysis") or {}).get("relative_strength_score") or 0.0),
+                int(dict(r.get("analysis") or {}).get("relative_strength_rank") or 999999),
+                str(r.get("display_path") or ""),
+            ),
+        )[:THEME_HISTORY_FALLBACK_LEADER_COUNT]
+    out_payload = {
+        "schema_version": 2,
+        "date": snap_date,
+        "rows": [_history_row_from_overview_row(r, snap_date) for r in selected],
+        "metric_rows": [_metric_row_from_overview_row(r, snap_date) for r in rows],
+    }
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    out_path = dest_dir / f"theme_snapshot_{_date_yyyymmdd(snap_date)}.json"
+    out_path.write_text(json.dumps(out_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out_path
 
 
 def _normalize_explicit_prefix(raw: str | None) -> str | None:
@@ -255,7 +380,7 @@ def sync_theme_snapshots(
             with tempfile.TemporaryDirectory(prefix="theme-history-asset-") as td:
                 tmp_path = Path(td) / name
                 download_asset_by_api(repo, snap, tmp_path)
-                written = expand_combined_snapshot_to_daily_files(tmp_path, dest_dir)
+                written = expand_combined_snapshot_to_daily_files(tmp_path, dest_dir, overwrite=False)
             print(
                 f"[sync-theme-history] {tag} -> {THEME_HISTORY_SNAPSHOT_ASSET} "
                 f"expanded to {len(written)} daily snapshot(s)"
@@ -264,6 +389,14 @@ def sync_theme_snapshots(
             dest = dest_dir / name
             download_asset_by_api(repo, snap, dest)
             print(f"[sync-theme-history] {tag} -> {dest.name}")
+        overview = pick_asset_by_name(assets, OVERVIEW_ASSET)
+        if overview:
+            with tempfile.TemporaryDirectory(prefix="theme-overview-asset-") as td:
+                overview_path = Path(td) / OVERVIEW_ASSET
+                download_asset_by_api(repo, overview, overview_path)
+                daily_path = write_daily_snapshot_from_overview(overview_path, dest_dir)
+            if daily_path:
+                print(f"[sync-theme-history] {tag} -> {OVERVIEW_ASSET} rebuilt {daily_path.name}")
         n += 1
     return n
 

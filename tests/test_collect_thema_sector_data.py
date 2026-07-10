@@ -27,7 +27,7 @@ from scripts.collect_thema_sector_data import (
     _render_theme_report_html,
     _resolve_classification_json,
 )
-from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files
+from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
 
 
 def test_build_thema_rows_and_render_html() -> None:
@@ -819,3 +819,59 @@ def test_expand_combined_snapshot_to_daily_files(tmp_path) -> None:
     assert payload["date"] == "2026-07-09"
     assert payload["rows"][0]["major_category"] == "B"
     assert payload["metric_rows"][0]["major_category"] == "B"
+
+
+def test_write_daily_snapshot_from_overview_rebuilds_release_day(tmp_path) -> None:
+    overview = tmp_path / "overview.json"
+    overview.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "theme_snapshot_date": "2026-07-08",
+                    "collected_at": "2026-07-08T18:37:00+09:00",
+                },
+                "major_rows": [
+                    {
+                        "group_type": "major",
+                        "major_category": "A",
+                        "display_path": "A",
+                        "major_stocks": [{"symbol": "1", "name": "Alpha", "rs": 90.0}],
+                        "analysis": {
+                            "leader_status": "주도",
+                            "relative_strength_score": 88.0,
+                            "relative_strength_rank": 1,
+                            "member_count": 3,
+                        },
+                    }
+                ],
+                "middle_rows": [
+                    {
+                        "group_type": "middle",
+                        "major_category": "B",
+                        "middle_category": "C",
+                        "display_path": "B > C",
+                        "major_stocks": [{"symbol": "2", "name": "Beta", "rs": 80.0}],
+                        "analysis": {
+                            "leader_status": "관심",
+                            "relative_strength_score": 70.0,
+                            "relative_strength_rank": 2,
+                            "member_count": 4,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    dest = tmp_path / "dest"
+
+    out_path = write_daily_snapshot_from_overview(overview, dest)
+
+    assert out_path is not None
+    assert out_path.name == "theme_snapshot_20260708.json"
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["date"] == "2026-07-08"
+    assert len(payload["rows"]) == 1
+    assert payload["rows"][0]["leader_top_stocks"][0]["symbol"] == "000001"
+    assert len(payload["metric_rows"]) == 2
