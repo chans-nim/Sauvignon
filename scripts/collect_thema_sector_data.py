@@ -903,6 +903,12 @@ def _iter_month_calendar_cells(month_first: _dt.date, month_last: _dt.date) -> l
     return out
 
 
+def _calendar_theme_class(display_path: str) -> str:
+    key = str(display_path or "-").split(">", 1)[0].strip() or "-"
+    h = sum((i + 1) * ord(ch) for i, ch in enumerate(key))
+    return f"cal-theme-{h % 12}"
+
+
 def _render_theme_history_calendar_html(
     by_date: dict[str, list[dict[str, Any]]],
     anchor: str,
@@ -941,6 +947,7 @@ def _render_theme_history_calendar_html(
                 for e in ents[: max(1, int(max_lines_per_cell))]:
                     path = str(e.get("display_path") or "-")
                     path_d = path if len(path) <= 18 else path[:16] + "…"
+                    theme_cls = _calendar_theme_class(path)
                     stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
                     st_raw = str(e.get("leader_status") or "").strip()
                     tag_html = ""
@@ -952,7 +959,7 @@ def _render_theme_history_calendar_html(
                         line = f"{_escape_html(path_d)} · {nm} <code>({sym})</code>{tag_html}"
                     else:
                         line = f"{_escape_html(path_d)}{tag_html}"
-                    parts.append(f'<div class="cal-line">{line}</div>')
+                    parts.append(f'<div class="cal-line cal-theme {theme_cls}">{line}</div>')
                 if len(ents) > int(max_lines_per_cell):
                     parts.append(f'<div class="cal-more">+{len(ents) - int(max_lines_per_cell)} 테마</div>')
                 parts.append("</div>")
@@ -2420,7 +2427,21 @@ def _render_theme_report_html(
         ".cal-cell.weekend .cal-daynum{color:#64748b;}"
         ".cal-daynum{font-weight:700;color:#0f172a;font-size:12px;}"
         ".cal-lines{margin-top:5px;color:#334155;line-height:1.35;}"
-        ".cal-line{word-break:break-word;margin-top:3px;}"
+        ".cal-line{word-break:break-word;margin-top:4px;}"
+        ".cal-theme{--theme-bg:#f8fafc;--theme-border:#94a3b8;--theme-text:#1e293b;padding:4px 5px 4px 7px;border-radius:8px;border-left:3px solid var(--theme-border);background:var(--theme-bg);color:var(--theme-text);box-shadow:inset 0 0 0 1px rgba(255,255,255,.58);font-weight:650;}"
+        ".cal-theme code{font-size:10px;color:inherit;background:rgba(255,255,255,.58);border-radius:5px;padding:0 3px;}"
+        ".cal-theme-0{--theme-bg:#eff6ff;--theme-border:#2563eb;--theme-text:#1e3a8a;}"
+        ".cal-theme-1{--theme-bg:#ecfdf5;--theme-border:#059669;--theme-text:#065f46;}"
+        ".cal-theme-2{--theme-bg:#fff7ed;--theme-border:#ea580c;--theme-text:#9a3412;}"
+        ".cal-theme-3{--theme-bg:#fdf2f8;--theme-border:#db2777;--theme-text:#9d174d;}"
+        ".cal-theme-4{--theme-bg:#f5f3ff;--theme-border:#7c3aed;--theme-text:#5b21b6;}"
+        ".cal-theme-5{--theme-bg:#ecfeff;--theme-border:#0891b2;--theme-text:#155e75;}"
+        ".cal-theme-6{--theme-bg:#fefce8;--theme-border:#ca8a04;--theme-text:#854d0e;}"
+        ".cal-theme-7{--theme-bg:#f0fdf4;--theme-border:#16a34a;--theme-text:#166534;}"
+        ".cal-theme-8{--theme-bg:#fef2f2;--theme-border:#dc2626;--theme-text:#991b1b;}"
+        ".cal-theme-9{--theme-bg:#eef2ff;--theme-border:#4f46e5;--theme-text:#3730a3;}"
+        ".cal-theme-10{--theme-bg:#f0f9ff;--theme-border:#0284c7;--theme-text:#075985;}"
+        ".cal-theme-11{--theme-bg:#faf5ff;--theme-border:#9333ea;--theme-text:#6b21a8;}"
         ".cal-more{margin-top:4px;font-size:10px;color:var(--muted);}"
         ".cal-tag{font-size:10px;color:#64748b;font-weight:600;}"
         "</style></head><body><div class=\"wrap\">"

@@ -16,6 +16,12 @@ htmlcov/
 # Virtual environments
 venv/
 .venv/
+.python*/
+
+# Local run scratch/install artifacts
+.tmp/
+python-*-amd64.exe
+python-install*.log
 
 # Local build artifacts and generated reports (excluded from Git)
 /reports/

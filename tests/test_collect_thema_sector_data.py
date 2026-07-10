@@ -200,6 +200,7 @@ def test_theme_history_calendar_shows_one_stock_per_theme() -> None:
     html = _render_theme_history_calendar_html(by_date, "2026-05-10")
     assert "SK" in html and "000660" in html
     assert "005930" not in html
+    assert "cal-theme" in html
 
 
 def test_theme_history_local_summary_counts_snapshot_files(tmp_path) -> None:
