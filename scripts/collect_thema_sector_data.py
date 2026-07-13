@@ -78,6 +78,7 @@ DEFAULT_THEME_HISTORY_DIR = Path("data/theme_history")
 THEME_HISTORY_LOAD_MAX_FILES = 40
 THEME_HISTORY_FALLBACK_LEADER_COUNT = 3
 THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK = 5
+THEME_HISTORY_MAX_RECENT_GAP_DAYS_FOR_CI = 14
 
 # `relative_strength_score` = 주도·실시간 기준(등락·거래대금) 비중이 크도록, RS(합성)는 보조. 합 1.0, 코호트=동일 대/중 그룹끼리
 GROUP_SCORE_W_REP_RETURN_COHORT = 0.26  # 대표(top_n) 평균 등락 백분위
@@ -431,6 +432,15 @@ def _limit_history_rows_to_recent_dates(rows: list[dict[str, Any]], max_days: in
     dates = sorted({str(r.get("date") or "") for r in rows if r.get("date")}, reverse=True)
     keep_dates = set(dates[: int(max_days)])
     return [r for r in rows if str(r.get("date") or "") in keep_dates]
+
+
+def _recent_history_gap_days(dates: list[str]) -> int | None:
+    parsed = sorted({_parse_iso_date(d) for d in dates if _parse_iso_date(d)}, reverse=True)
+    if len(parsed) < 2:
+        return None
+    latest = _dt.date.fromisoformat(parsed[0])
+    previous = _dt.date.fromisoformat(parsed[1])
+    return (latest - previous).days
 
 
 def _load_theme_history_rows(history_dir: Path, *, max_days: int = 30, leaders_only: bool = False) -> list[dict[str, Any]]:
@@ -2582,58 +2592,74 @@ def main() -> None:
             repo = parse_repo_from_url(repo_raw)
             if not repo or "/" not in repo:
                 repo = "chans-nim/Sauvignon"
-            if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
+            running_in_github_actions = str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true"
+            with tempfile.TemporaryDirectory(prefix="theme-history-release-") as td:
+                release_dir = Path(td)
                 n_dl = sync_theme_snapshots(
                     repo,
-                    history_dir,
+                    release_dir,
                     explicit_prefix=None,
                     max_releases=max(0, int(args.theme_history_sync_max_releases)),
                 )
-                print(f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신 ({repo})")
-            else:
-                with tempfile.TemporaryDirectory(prefix="theme-history-release-") as td:
-                    release_dir = Path(td)
-                    n_dl = sync_theme_snapshots(
-                        repo,
-                        release_dir,
-                        explicit_prefix=None,
-                        max_releases=max(0, int(args.theme_history_sync_max_releases)),
+                release_rows = _load_theme_history_rows(release_dir, max_days=0)
+                release_dates = sorted(
+                    {
+                        str(r.get("date") or "").strip()
+                        for r in release_rows
+                        if str(r.get("date") or "").strip()
+                    }
+                )
+                if not release_dates:
+                    if running_in_github_actions:
+                        raise RuntimeError(
+                            f"GitHub 릴리즈 히스토리 동기화 결과 사용 가능한 날짜가 없습니다 ({repo}, assets={n_dl})"
+                        )
+                    print(
+                        f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신, "
+                        "사용 가능한 날짜 없음 → 기존 히스토리 유지"
                     )
-                    release_rows = _load_theme_history_rows(release_dir, max_days=0)
-                    release_dates = sorted(
-                        {
-                            str(r.get("date") or "").strip()
-                            for r in release_rows
-                            if str(r.get("date") or "").strip()
-                        }
+                elif len(release_dates) < THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK:
+                    if running_in_github_actions:
+                        raise RuntimeError(
+                            "GitHub 릴리즈 히스토리 동기화 날짜가 너무 적습니다: "
+                            f"{len(release_dates)}일 "
+                            f"(< {THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK}, {repo}, assets={n_dl})"
+                        )
+                    merged = _combine_theme_history_dirs(
+                        [history_dir, release_dir],
+                        history_dir,
+                        max_days=THEME_HISTORY_LOAD_MAX_FILES,
                     )
-                    if not release_dates:
-                        print(
-                            f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신, "
-                            "사용 가능한 날짜 없음 → 로컬 히스토리 유지"
+                    print(
+                        f"[theme-history] GitHub 릴리즈 날짜 {len(release_dates)}일 "
+                        f"(< {THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK}) → 기존 히스토리와 병합: "
+                        f"{merged['distinct_dates']}일, metric {merged['metric_rows']}줄"
+                    )
+                else:
+                    recent_gap_days = _recent_history_gap_days(release_dates)
+                    if (
+                        running_in_github_actions
+                        and recent_gap_days is not None
+                        and recent_gap_days > THEME_HISTORY_MAX_RECENT_GAP_DAYS_FOR_CI
+                    ):
+                        raise RuntimeError(
+                            "GitHub 릴리즈 히스토리 최신 구간이 비어 있습니다: "
+                            f"latest={release_dates[-1]}, previous={release_dates[-2]}, "
+                            f"gap={recent_gap_days}일 "
+                            f"(max={THEME_HISTORY_MAX_RECENT_GAP_DAYS_FOR_CI}, {repo}, assets={n_dl})"
                         )
-                    elif len(release_dates) < THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK:
-                        merged = _combine_theme_history_dirs(
-                            [history_dir, release_dir],
-                            history_dir,
-                            max_days=THEME_HISTORY_LOAD_MAX_FILES,
-                        )
-                        print(
-                            f"[theme-history] GitHub 릴리즈 날짜 {len(release_dates)}일 "
-                            f"(< {THEME_HISTORY_MIN_RELEASE_DAYS_FOR_LOCAL_FALLBACK}) → 로컬 히스토리와 병합: "
-                            f"{merged['distinct_dates']}일, metric {merged['metric_rows']}줄"
-                        )
-                    else:
-                        merged = _combine_theme_history_dirs(
-                            [release_dir],
-                            history_dir,
-                            max_days=THEME_HISTORY_LOAD_MAX_FILES,
-                        )
-                        print(
-                            f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신 ({repo}), "
-                            f"릴리즈 히스토리 {merged['distinct_dates']}일 사용"
-                        )
+                    merged = _combine_theme_history_dirs(
+                        [release_dir],
+                        history_dir,
+                        max_days=THEME_HISTORY_LOAD_MAX_FILES,
+                    )
+                    print(
+                        f"[theme-history] GitHub 릴리즈 동기화: 스냅샷 자산 {n_dl}건 수신 ({repo}), "
+                        f"릴리즈 히스토리 {merged['distinct_dates']}일 사용"
+                    )
         except Exception as exc:
+            if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
+                raise
             print(
                 f"[theme-history] WARNING: GitHub 동기화 실패 — 로컬 `data/theme_history` 만 사용합니다: {exc}",
                 file=sys.stderr,

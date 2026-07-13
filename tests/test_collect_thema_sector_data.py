@@ -17,6 +17,7 @@ from scripts.collect_thema_sector_data import (
     _combine_theme_history_dirs,
     _build_theme_daily_leader_history_sections,
     _load_theme_history_rows,
+    _recent_history_gap_days,
     _render_theme_history_calendar_html,
     _theme_history_local_summary,
     classify_theme_quality,
@@ -788,6 +789,25 @@ def test_load_theme_history_rows_reads_combined_and_daily_snapshots(tmp_path) ->
     rows = _load_theme_history_rows(tmp_path)
 
     assert {r["date"] for r in rows} == {"2026-06-09", "2026-07-08"}
+
+
+def test_recent_history_gap_days_detects_stale_middle_dates() -> None:
+    dates = [
+        "2026-05-07",
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14",
+        "2026-05-15",
+        "2026-05-18",
+        "2026-05-19",
+        "2026-05-20",
+        "2026-05-21",
+        "2026-07-13",
+    ]
+
+    assert _recent_history_gap_days(dates) == 53
 
 
 def test_expand_combined_snapshot_to_daily_files(tmp_path) -> None:
