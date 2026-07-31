@@ -1,48 +1,48 @@
 {
   "schema_version": 2,
   "latest_current": {
-    "tag": "data-snapshot-20260730-1307",
+    "tag": "data-snapshot-20260731-0534",
     "release_type": "snapshot",
-    "file_name": "data-snapshot-20260730-1307.parquet",
-    "sha256": "f27832ee76981e0494ce6db26ad8ec074b9f4c301d03796408d5334a24b4c5ab",
-    "row_count": 7387652,
-    "created_at": "2026-07-30T13:08:23Z",
+    "file_name": "data-snapshot-20260731-0534.parquet",
+    "sha256": "4f88e1d4c3131e3d97c2331bf580a185adf6a884c3bbb8207b6a855169bea828",
+    "row_count": 7391954,
+    "created_at": "2026-07-31T05:35:35Z",
     "min_date": "2016-01-04",
-    "max_date": "2026-07-30",
+    "max_date": "2026-07-31",
     "assets": [
       {
-        "name": "data-snapshot-20260730-1307.json",
-        "sha256": "5bc422e2a7bc44d97360effb30840c7ae8e3f0b8057e57cafcfb9a899e51f118",
-        "bytes": 1496,
-        "updated_at": "2026-07-30T13:08:23Z",
+        "name": "data-snapshot-20260731-0534.json",
+        "sha256": "911334c52a5338f39fd5dd529bce37e9be938586cd69d6ee0304fefef549d8ae",
+        "bytes": 1498,
+        "updated_at": "2026-07-31T05:35:35Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260730-1307.output1-latest.parquet",
-        "sha256": "2c1f93a5cb7fbdd8e10871f05bb5ee9d2a7227c4a3a06d95b6663b84f64a7e1f",
-        "bytes": 88034,
-        "updated_at": "2026-07-30T13:08:23Z",
+        "name": "data-snapshot-20260731-0534.output1-latest.parquet",
+        "sha256": "de1483ed23137e65115ec1eab3599938a436e6aa4e9baa4d7c99db138d6fadf1",
+        "bytes": 1658784,
+        "updated_at": "2026-07-31T05:35:35Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260730-1307.parquet",
-        "sha256": "f27832ee76981e0494ce6db26ad8ec074b9f4c301d03796408d5334a24b4c5ab",
-        "bytes": 147737855,
-        "updated_at": "2026-07-30T13:08:23Z",
+        "name": "data-snapshot-20260731-0534.parquet",
+        "sha256": "4f88e1d4c3131e3d97c2331bf580a185adf6a884c3bbb8207b6a855169bea828",
+        "bytes": 143922650,
+        "updated_at": "2026-07-31T05:35:35Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260730-1307.sha256",
-        "sha256": "450f865f39f099755fb4bf16b6c3245174536b163fdee94768a9d4a8b1699329",
+        "name": "data-snapshot-20260731-0534.sha256",
+        "sha256": "bd0f55b56a1ec4b21779ffb26ec061397bbac17d6bbd0ba09ab99bf046714d83",
         "bytes": 65,
-        "updated_at": "2026-07-30T13:08:23Z",
+        "updated_at": "2026-07-31T05:35:35Z",
         "release_type": "snapshot"
       },
       {
-        "name": "data-snapshot-20260730-1307.ticker-state.parquet",
-        "sha256": "9d8b0d103fd6b00ef7d9da603e15fe8bf38348252fdb37eafd2797813f4eb9c3",
-        "bytes": 192928,
-        "updated_at": "2026-07-30T13:08:23Z",
+        "name": "data-snapshot-20260731-0534.ticker-state.parquet",
+        "sha256": "b28c4ca8ea84ad18910c1cf2ea1dad30312ed2bbe743a9a37b696f1b07379997",
+        "bytes": 194584,
+        "updated_at": "2026-07-31T05:35:35Z",
         "release_type": "snapshot"
       }
     ]
@@ -60,10 +60,15 @@
     "assets": []
   },
   "release_type": "snapshot",
-  "row_count": 7387652,
-  "created_at": "2026-07-30T13:08:23Z",
+  "row_count": 7391954,
+  "created_at": "2026-07-31T05:35:35Z",
   "history": {
     "release_tags": [
+      {
+        "tag": "data-snapshot-20260731-0534",
+        "release_type": "snapshot",
+        "created_at": "2026-07-31T05:35:35Z"
+      },
       {
         "tag": "data-snapshot-20260730-1307",
         "release_type": "snapshot",
@@ -658,11 +663,6 @@
         "tag": "data-snapshot-20260514-0555",
         "release_type": "snapshot",
         "created_at": "2026-05-14T05:56:39Z"
-      },
-      {
-        "tag": "data-snapshot-20260513-1339",
-        "release_type": "snapshot",
-        "created_at": "2026-05-13T13:40:23Z"
       }
     ],
     "delta_tags": []
