@@ -27,6 +27,7 @@ from scripts.collect_thema_sector_data import (
     _select_quote_symbols,
     _render_theme_report_html,
     _resolve_classification_json,
+    _validate_classification_data,
 )
 from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
 
@@ -146,6 +147,64 @@ def test_build_thema_rows_and_render_html() -> None:
     assert "Theme RS" not in html
     assert "주도테마 캘린더·히스토리" in html
     assert "cal-wrap" in html
+
+
+def test_build_blueprints_uses_canonical_multi_sector_assignments() -> None:
+    stock = {
+        "stockCode": "005930",
+        "stockName": "삼성전자",
+        "marketCap": 1_000,
+        "sectors": [
+            {"majorCategory": "반도체", "middleCategory": "메모리"},
+            {"majorCategory": "반도체", "middleCategory": "비메모리"},
+        ],
+    }
+    data = {
+        "major_categories": [
+            {
+                "majorCategory": "반도체",
+                "subCategories": [
+                    {"middleCategory": "메모리", "stocks": [stock]},
+                    {"middleCategory": "비메모리", "stocks": [stock]},
+                ],
+            }
+        ],
+        "stock_to_sectors": [stock],
+    }
+
+    major, middle = _build_group_blueprints(data)
+
+    assert major[0]["member_count"] == 1
+    assert [row["member_count"] for row in middle] == [1, 1]
+    assert all(row["stocks"][0]["symbol"] == "005930" for row in middle)
+
+
+def test_classification_validator_detects_count_and_unknown_sector() -> None:
+    stock = {
+        "stockCode": "005930",
+        "stockName": "삼성전자",
+        "sectors": [{"majorCategory": "없는대분류", "middleCategory": "없는중분류"}],
+    }
+    data = {
+        "major_category_count": 2,
+        "middle_category_count": 1,
+        "unique_stock_count": 1,
+        "actual_multi_sector_stock_count_in_source": 0,
+        "major_categories": [
+            {
+                "majorCategory": "반도체",
+                "count": 2,
+                "subCategories": [{"middleCategory": "메모리", "count": 2, "stocks": [stock]}],
+            }
+        ],
+        "stock_to_sectors": [stock],
+    }
+
+    issues = _validate_classification_data(data)
+
+    assert any("major_category_count" in issue for issue in issues)
+    assert any("count=2 actual=1" in issue for issue in issues)
+    assert any("unknown sector" in issue for issue in issues)
 
 
 def test_build_theme_daily_leader_history_sections_prefers_today_live() -> None:

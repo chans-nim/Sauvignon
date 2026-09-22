@@ -1316,7 +1316,102 @@ def _load_classification_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise SystemExit(f"Invalid classification json: {path}")
+    errors = [x for x in _validate_classification_data(data) if x.startswith("ERROR:")]
+    if errors:
+        raise SystemExit(f"Invalid classification json: {path}\n" + "\n".join(errors))
     return data
+
+
+def _validate_classification_data(data: dict[str, Any]) -> list[str]:
+    """Return deterministic schema/count/referential-integrity audit messages."""
+    issues: list[str] = []
+    majors = [x for x in (data.get("major_categories") or []) if isinstance(x, dict)]
+    middle_count = 0
+    nested_symbols: set[str] = set()
+    paths: set[tuple[str, str]] = set()
+    for major_item in majors:
+        major = str(major_item.get("majorCategory") or "").strip()
+        if not major:
+            issues.append("ERROR: blank majorCategory")
+            continue
+        major_actual = 0
+        for sub in (major_item.get("subCategories") or []):
+            if not isinstance(sub, dict):
+                issues.append(f"ERROR: {major}: non-object subCategory")
+                continue
+            middle = str(sub.get("middleCategory") or "").strip()
+            if not middle:
+                issues.append(f"ERROR: {major}: blank middleCategory")
+                continue
+            middle_count += 1
+            paths.add((major, middle))
+            stocks = [s for s in (sub.get("stocks") or []) if isinstance(s, dict)]
+            actual = len(stocks)
+            major_actual += actual
+            if sub.get("count") is not None and int(sub["count"]) != actual:
+                issues.append(f"ERROR: {major}>{middle}: count={sub['count']} actual={actual}")
+            seen_here: set[str] = set()
+            for stock in stocks:
+                sym = _norm_kis_stock_symbol(stock.get("stockCode", ""))
+                if not sym or len(sym) != 6 or not sym.isdigit():
+                    issues.append(f"ERROR: {major}>{middle}: invalid stockCode={stock.get('stockCode')!r}")
+                    continue
+                if sym in seen_here:
+                    issues.append(f"ERROR: {major}>{middle}: duplicate stockCode={sym}")
+                seen_here.add(sym)
+                nested_symbols.add(sym)
+                declared_paths = {
+                    (
+                        str(sector.get("majorCategory") or "").strip(),
+                        str(sector.get("middleCategory") or "").strip(),
+                    )
+                    for sector in (stock.get("sectors") or [])
+                    if isinstance(sector, dict)
+                }
+                if declared_paths and (major, middle) not in declared_paths:
+                    issues.append(f"ERROR: {major}>{middle}: {sym} does not declare its nested sector")
+        if major_item.get("count") is not None and int(major_item["count"]) != major_actual:
+            issues.append(f"ERROR: {major}: count={major_item['count']} actual={major_actual}")
+
+    if data.get("major_category_count") is not None and int(data["major_category_count"]) != len(majors):
+        issues.append(f"ERROR: major_category_count={data['major_category_count']} actual={len(majors)}")
+    if data.get("middle_category_count") is not None and int(data["middle_category_count"]) != middle_count:
+        issues.append(f"ERROR: middle_category_count={data['middle_category_count']} actual={middle_count}")
+
+    canonical = [x for x in (data.get("stock_to_sectors") or []) if isinstance(x, dict)]
+    if canonical:
+        canonical_symbols: set[str] = set()
+        multi_count = 0
+        for stock in canonical:
+            sym = _norm_kis_stock_symbol(stock.get("stockCode", ""))
+            if not sym or len(sym) != 6 or not sym.isdigit():
+                issues.append(f"ERROR: stock_to_sectors invalid stockCode={stock.get('stockCode')!r}")
+                continue
+            if sym in canonical_symbols:
+                issues.append(f"ERROR: stock_to_sectors duplicate stockCode={sym}")
+            canonical_symbols.add(sym)
+            sectors = [s for s in (stock.get("sectors") or []) if isinstance(s, dict)]
+            if len(sectors) > 1:
+                multi_count += 1
+            if not sectors:
+                issues.append(f"ERROR: stock_to_sectors {sym}: no sectors")
+            for sector in sectors:
+                path = (str(sector.get("majorCategory") or "").strip(), str(sector.get("middleCategory") or "").strip())
+                if path not in paths:
+                    issues.append(f"ERROR: stock_to_sectors {sym}: unknown sector {path[0]}>{path[1]}")
+        if canonical_symbols != nested_symbols:
+            issues.append(
+                f"ERROR: nested/canonical symbols differ "
+                f"(nested_only={len(nested_symbols-canonical_symbols)}, canonical_only={len(canonical_symbols-nested_symbols)})"
+            )
+        if data.get("unique_stock_count") is not None and int(data["unique_stock_count"]) != len(canonical_symbols):
+            issues.append(f"ERROR: unique_stock_count={data['unique_stock_count']} actual={len(canonical_symbols)}")
+        if data.get("actual_multi_sector_stock_count_in_source") is not None and int(data["actual_multi_sector_stock_count_in_source"]) != multi_count:
+            issues.append(
+                f"ERROR: actual_multi_sector_stock_count_in_source="
+                f"{data['actual_multi_sector_stock_count_in_source']} actual={multi_count}"
+            )
+    return issues
 
 
 def _normalize_stock(raw: dict[str, Any], *, major: str, middle: str) -> dict[str, Any]:
@@ -1362,6 +1457,41 @@ def _sort_theme_members(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _build_group_blueprints(data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    # schema v2의 canonical stock_to_sectors를 실제 분류 원본으로 사용한다. 과거에는
+    # sectors 배열을 무시해 복수 테마가 리포트에 반영되지 않았다.
+    canonical = [x for x in (data.get("stock_to_sectors") or []) if isinstance(x, dict)]
+    if canonical:
+        stock_by_path: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for raw in canonical:
+            for sector in (raw.get("sectors") or []):
+                if not isinstance(sector, dict):
+                    continue
+                major = str(sector.get("majorCategory") or "").strip()
+                middle = str(sector.get("middleCategory") or "").strip()
+                if major and middle:
+                    stock_by_path.setdefault((major, middle), []).append(raw)
+        data = dict(data)
+        rebuilt_majors: list[dict[str, Any]] = []
+        for major_item in (data.get("major_categories") or []):
+            if not isinstance(major_item, dict):
+                continue
+            major = str(major_item.get("majorCategory") or "").strip()
+            rebuilt_subs: list[dict[str, Any]] = []
+            for sub in (major_item.get("subCategories") or []):
+                if not isinstance(sub, dict):
+                    continue
+                middle = str(sub.get("middleCategory") or "").strip()
+                stocks = stock_by_path.get((major, middle), [])
+                rebuilt_subs.append({"middleCategory": middle, "count": len(stocks), "stocks": stocks})
+            rebuilt_majors.append(
+                {
+                    "majorCategory": major,
+                    "count": sum(len(x["stocks"]) for x in rebuilt_subs),
+                    "subCategories": rebuilt_subs,
+                }
+            )
+        data["major_categories"] = rebuilt_majors
+
     major_rows = []
     middle_rows = []
     for major_item in data.get("major_categories") or []:
