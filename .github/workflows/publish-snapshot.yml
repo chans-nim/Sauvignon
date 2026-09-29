@@ -19,6 +19,10 @@ on:
         description: "Release type: snapshot | full"
         required: true
         default: "snapshot"
+        type: choice
+        options:
+          - snapshot
+          - full
       asset_url:
         description: "[Bootstrap only] Parquet URL"
         required: false
@@ -59,7 +63,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-release
+  group: dataset-release
   cancel-in-progress: false
 
 jobs:
@@ -71,44 +75,40 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Acquire lock
+      - name: Validate release metadata
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
-          python3 - << 'PY'
-          import json, os, datetime
-          from pathlib import Path
-          lock_path = Path("LOCK.json")
-          now = datetime.datetime.now(datetime.timezone.utc)
-          if lock_path.exists():
-              lock = json.loads(lock_path.read_text(encoding="utf-8"))
-              exp = lock.get("expires_at")
-              if lock.get("locked") and exp:
-                  exp_dt = datetime.datetime.fromisoformat(exp.replace("Z","+00:00"))
-                  if exp_dt > now:
-                      raise SystemExit(f"LOCKED by {lock.get('owner')} until {exp_dt.isoformat()}")
-          lock = {
-              "locked": True,
-              "owner": "github-actions",
-              "run_id": os.environ.get("GITHUB_RUN_ID"),
-              "started_at": now.isoformat().replace("+00:00","Z"),
-              "expires_at": (now + datetime.timedelta(hours=2)).isoformat().replace("+00:00","Z")
+          set -euo pipefail
+          [[ "$TAG" =~ ^data-${RELEASE_TYPE}-[0-9]{8}(-[0-9]{4})?$ ]] || {
+            echo "Tag does not match release type/date format: $TAG"
+            exit 1
           }
-          lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
-          PY
-          git add LOCK.json
-          git commit -m "chore: acquire lock" || true
-          git push || true
 
       - name: Resolve bootstrap defaults
         id: bootstrap_defaults
         if: inputs.mode == 'bootstrap'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_ASSET_URL: ${{ inputs.asset_url }}
         run: |
-          TAG="${{ inputs.tag }}"
-          ASSET_URL="${{ inputs.asset_url }}"
+          TAG="${INPUT_TAG}"
+          ASSET_URL="${INPUT_ASSET_URL}"
           DEFAULT_TAG="data-snapshot-20260330-1020"
           DEFAULT_PARQUET_URL="https://drive.google.com/file/d/1tpYChlp1yi2mXBTALtmt61yXb5XAhGaR/view?usp=sharing"
           if [ -z "${ASSET_URL}" ] && [ "${TAG}" = "${DEFAULT_TAG}" ]; then
@@ -160,6 +160,7 @@ jobs:
           if [ -z "${fname}" ]; then
             fname="$(basename "${url%%\?*}")"
           fi
+          fname="$(basename "$fname")"
           if echo "$url" | grep -q 'drive\.google\.com'; then
             echo "Downloading from Google Drive (gdown)..."
             python3 -m pip install -q gdown
@@ -196,6 +197,7 @@ jobs:
         if: inputs.mode == 'from_latest'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          NEW_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p _tmp
@@ -224,11 +226,30 @@ jobs:
           fi
           echo "Latest release: $LATEST_TAG"
           gh release download "$LATEST_TAG" -D _tmp
-          fname=$(ls _tmp/*.parquet 2>/dev/null | head -1 | xargs basename)
-          if [ -z "$fname" ]; then
-            echo "No parquet asset in latest release"
-            exit 1
-          fi
+          fname=$(python3 - "$LATEST_TAG" <<'PY'
+          import sys
+          from pathlib import Path
+          tag = sys.argv[1]
+          preferred = Path("_tmp") / f"{tag}.parquet"
+          if preferred.is_file():
+              print(preferred.name)
+              raise SystemExit(0)
+          candidates = [
+              p for p in Path("_tmp").glob("*.parquet")
+              if not p.name.endswith((".ticker-state.parquet", ".output1-latest.parquet"))
+          ]
+          if len(candidates) != 1:
+              names = ", ".join(sorted(p.name for p in candidates)) or "(none)"
+              raise SystemExit(f"Expected one main parquet for {tag}, got: {names}")
+          print(candidates[0].name)
+          PY
+          )
+          python -m scripts.prepare_snapshot_rerelease \
+            --dir _tmp \
+            --old-tag "$LATEST_TAG" \
+            --new-tag "$NEW_TAG" \
+            --main-name "$fname"
+          fname="${NEW_TAG}.parquet"
           echo "$fname" > _tmp/asset_name.txt
           if [ -f "_tmp/"*".sha256" ]; then
             sha256_file=$(ls _tmp/*.sha256 2>/dev/null | head -1)
@@ -283,6 +304,18 @@ jobs:
           echo "Got:      $got"
           test "$got" = "$EXPECTED"
 
+      - name: Validate snapshot parquet
+        id: validate
+        run: |
+          fname="$(cat _tmp/asset_name.txt)"
+          python -m scripts.validate_snapshot \
+            --file-path "_tmp/$fname" \
+            --strict \
+            --file-only \
+            --expected-row-count "${{ inputs.row_count }}" \
+            --expected-min-date "${{ inputs.min_date }}" \
+            --expected-max-date "${{ inputs.max_date }}"
+
       - name: Create release if not exists
         env:
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
@@ -323,9 +356,9 @@ jobs:
           RELEASE_TYPE: ${{ inputs.release_type }}
           MODE: ${{ inputs.mode }}
           ASSET_SHA256: ${{ steps.sha256_resolve.outputs.expected }}
-          MIN_DATE: ${{ inputs.min_date }}
-          MAX_DATE: ${{ inputs.max_date }}
-          ROW_COUNT: ${{ inputs.row_count }}
+          MIN_DATE: ${{ steps.validate.outputs.min_date }}
+          MAX_DATE: ${{ steps.validate.outputs.max_date }}
+          ROW_COUNT: ${{ steps.validate.outputs.row_count }}
         run: |
           python3 - << 'PY'
           import hashlib, json, os
@@ -379,21 +412,9 @@ jobs:
           path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
           git add data_manifest.json
-          git commit -m "data: update manifest for $TAG" || true
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged"
+          else
+            git commit -m "data: update manifest for $TAG"
+          fi
           git push
-
-      - name: Release lock
-        if: always()
-        run: |
-          python3 - << 'PY'
-          import json
-          from pathlib import Path
-          lock_path = Path("LOCK.json")
-          if lock_path.exists():
-              lock = json.loads(lock_path.read_text(encoding="utf-8"))
-              lock["locked"] = False
-              lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
-          PY
-          git add LOCK.json
-          git commit -m "chore: release lock" || true
-          git push || true

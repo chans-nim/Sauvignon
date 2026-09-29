@@ -134,13 +134,15 @@ def main() -> None:
     parser.add_argument("--no-merge", action="store_true", help="연도별 병합 없이 연도 단위로만 수집 (느리지만 세밀)")
     args = parser.parse_args()
 
-    run_gap_fill(
+    _total, _success, failed = run_gap_fill(
         target_start=args.target_start,
         target_end=args.target_end,
         min_rows_per_year=args.min_rows_per_year,
         coverage_threshold=args.coverage_threshold,
         merge=not args.no_merge,
     )
+    if failed:
+        raise SystemExit(f"gap_fill incomplete: failed={failed}")
 
 
 if __name__ == "__main__":

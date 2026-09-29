@@ -1,7 +1,9 @@
 from __future__ import annotations
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
+import os
 import subprocess
 import sys
+from zoneinfo import ZoneInfo
 
 import duckdb
 
@@ -11,6 +13,31 @@ from src.jobs.gap_fill_job import run_gap_fill
 from src.common.settings import settings
 
 log = get_logger(__name__)
+KST = ZoneInfo("Asia/Seoul")
+
+
+def resolve_collection_target_date(now: datetime | None = None) -> date:
+    """Resolve the market date independently of delayed GitHub scheduling.
+
+    Before the Korean market opens, collect the previous weekday instead of treating the
+    new calendar day as the target. Exchange holidays are deliberately not guessed here:
+    an unexpected empty weekday must fail closed rather than publish an incomplete snapshot.
+    """
+    current = now.astimezone(KST) if now is not None and now.tzinfo else (now.replace(tzinfo=KST) if now else datetime.now(KST))
+    candidate = current.date()
+    if current.time() < time(9, 0):
+        candidate -= timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def write_github_output(name: str, value: object) -> None:
+    path = (os.getenv("GITHUB_OUTPUT") or "").strip()
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{name}={value}\n")
 
 
 def check_last_collect_failure() -> None:
@@ -115,17 +142,21 @@ def run_incremental_and_gap_fill(
     *,
     incremental_runner=run_incremental,
     gap_fill_runner=run_gap_fill,
-) -> None:
+) -> tuple[int, int, int]:
     incremental_runner(start, end)
     log.info("run post-incremental gap fill: %s..%s", start.isoformat(), end.isoformat())
-    gap_fill_runner(target_start=start.isoformat(), target_end=end.isoformat(), merge=True)
+    total, success, failed = gap_fill_runner(target_start=start.isoformat(), target_end=end.isoformat(), merge=True)
+    if failed:
+        raise RuntimeError(
+            f"gap fill incomplete: total={total} success={success} failed={failed}; refusing downstream publish"
+        )
+    return int(total), int(success), int(failed)
 
 
 def main() -> None:
-    # 당일까지 수집(target_end = 오늘). 로컬 TZ 사용, Actions에서는 TZ=Asia/Seoul(KST) 적용.
-    # 오늘은 가격 변동이 있을 수 있으므로, 이미 당일 데이터가 있어도 매 run에서 갱신한다.
-    today = date.today()
-    target_end = today
+    # GitHub schedule이 자정을 넘어 지연돼도 새벽의 빈 날짜를 수집 대상으로 잡지 않는다.
+    target_end = resolve_collection_target_date()
+    write_github_output("target_date", target_end.isoformat())
     if target_end < date(2000, 1, 1):
         log.info("system date looks wrong, skip collect")
         return
@@ -141,15 +172,19 @@ def main() -> None:
 
     start = last_success + timedelta(days=1)
     if start > target_end:
-        # 이미 당일까지 있음 → 오늘만 다시 수집해 최신 가격으로 갱신
-        start = today
-        end = today
+        # 이미 대상일까지 있음 → 대상일을 강제로 다시 받아 장중 값을 마감 값으로 갱신한다.
+        start = target_end
+        end = target_end
         log.info("refreshing today only: %s", end.isoformat())
     else:
         end = target_end
 
-    run_incremental_and_gap_fill(start, end)
+    write_github_output("collection_start_date", start.isoformat())
+    gap_total, gap_success, gap_failed = run_incremental_and_gap_fill(start, end)
     check_last_collect_failure()
+    write_github_output("gap_total", gap_total)
+    write_github_output("gap_success", gap_success)
+    write_github_output("gap_failed", gap_failed)
 
 
 if __name__ == "__main__":

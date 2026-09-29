@@ -183,6 +183,7 @@ def run_repair_loop(target: str, rows: list[dict], *, limit: int | None) -> tupl
             target,
             use_existing=False,
             coverage_threshold=0.7,
+            require_end_date=True,
         )
         if success:
             ok += 1
@@ -252,6 +253,8 @@ def main() -> None:
         note=f"date={target}",
     )
     log.info("repair_zero_volume_day done: ok=%s fail=%s", ok, fail)
+    if fail:
+        raise SystemExit(f"repair_zero_volume_day incomplete: ok={ok} fail={fail}")
 
 
 if __name__ == "__main__":

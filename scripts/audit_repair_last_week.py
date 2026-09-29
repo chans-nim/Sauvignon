@@ -29,6 +29,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
 from src.common.logger import get_logger
 from src.storage import meta_store
 from src.transform.build_snapshot import silver_parquet_paths
+from scripts.run_daily_collect import resolve_collection_target_date, write_github_output
 
 import importlib.util
 
@@ -114,8 +115,10 @@ def main() -> None:
     if args.days < 1:
         parser.error("--days must be >= 1")
 
-    end = date.fromisoformat(args.end_date) if args.end_date else date.today()
+    end = date.fromisoformat(args.end_date) if args.end_date else resolve_collection_target_date()
     start = end - timedelta(days=args.days - 1)
+    write_github_output("target_date", end.isoformat())
+    write_github_output("collection_start_date", start.isoformat())
 
     paths = silver_parquet_paths()
     if not paths:
@@ -173,6 +176,7 @@ def main() -> None:
             f"(ratio<={args.low_volume_ratio}, lookback={args.low_volume_lookback_days}, "
             f"min_baseline={args.min_baseline_volume}, min_history={args.min_history_points})"
         )
+
     if args.audit_only or args.dry_run:
         if args.json_summary:
             print(
@@ -296,6 +300,12 @@ def main() -> None:
             low_total_proc,
             low_total_ok,
             low_total_fail,
+        )
+
+    if merged_fail:
+        raise SystemExit(
+            f"audit repair incomplete: processed={merged_proc} success={merged_ok} failed={merged_fail}; "
+            "refusing snapshot publish"
         )
 
     if args.json_summary:

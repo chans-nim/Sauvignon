@@ -1229,7 +1229,9 @@ def _fetch_quote_enrichment_concurrent(
     symbols: list[str],
     *,
     fetch_investor_per_symbol: bool,
+    investor_target_symbols: set[str] | None = None,
     max_workers: int = 4,
+    fetch_quote: bool = True,
     fetch_program: bool = True,
     log_label: str = "[enrichment]",
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -1254,15 +1256,19 @@ def _fetch_quote_enrichment_concurrent(
     def _one(sym_raw: str) -> None:
         sym = _norm_kis_stock_symbol(sym_raw)
         quote: dict[str, Any] = {}
-        try:
-            q = client.fetch_stock_price(sym)
-            if isinstance(q, dict) and q:
-                quote = q
-        except Exception:
-            pass
+        if fetch_quote:
+            try:
+                q = client.fetch_stock_price(sym)
+                if isinstance(q, dict) and q:
+                    quote = q
+            except Exception:
+                pass
 
         inv: dict[str, Any] = {}
-        if fetch_investor_per_symbol:
+        fetch_investor_for_this_symbol = fetch_investor_per_symbol and (
+            investor_target_symbols is None or sym in investor_target_symbols
+        )
+        if fetch_investor_for_this_symbol:
             try:
                 if hasattr(client, "fetch_foreign_institution_for_symbol"):
                     d = client.fetch_foreign_institution_for_symbol(sym)
@@ -1284,7 +1290,7 @@ def _fetch_quote_enrichment_concurrent(
         with lock:
             if quote:
                 quotes_by_symbol[sym] = quote
-            if fetch_investor_per_symbol and (
+            if fetch_investor_for_this_symbol and (
                 inv.get("foreign_net_tr_pbmn") is not None or inv.get("institution_net_tr_pbmn") is not None
             ):
                 investor_out[sym] = {
@@ -2675,6 +2681,11 @@ def main() -> None:
         default=4,
         help="보강(시세·프로그램·필요 시 종목별 수급) 병렬 워커 수. 기본 4. 과도한 값은 KIS 제한에 걸릴 수 있음.",
     )
+    parser.add_argument(
+        "--strict-completeness",
+        action="store_true",
+        help="Fail instead of publishing when required quote/investor enrichment is empty or incomplete.",
+    )
     parser.add_argument("--telegram", action="store_true", help="Send summary + html report to Telegram.")
     parser.add_argument(
         "--telegram-bot-token",
@@ -2864,6 +2875,13 @@ def main() -> None:
             f"[timing] probe_minimal_quotes  {time.perf_counter() - t_pq:.2f}s  "
             f"ok={len(probe_quotes)}/{probe_minimal_target_n}"
         )
+        if args.strict_completeness and len(probe_quotes) != probe_minimal_target_n:
+            missing = sorted(set(probe_syms) - set(probe_quotes))
+            raise RuntimeError(
+                "quote probe incomplete: "
+                f"ok={len(probe_quotes)} expected={probe_minimal_target_n} "
+                f"missing_sample={missing[:20]}"
+            )
 
     quote_symbols = _select_quote_symbols(
         all_groups,
@@ -2879,28 +2897,38 @@ def main() -> None:
     quotes_by_symbol: dict[str, dict[str, Any]] = dict(probe_quotes)
     program_by_symbol: dict[str, dict[str, Any]] = {}
     if quote_enrichment:
-        have_rank_investor = bool(investor_by_symbol)
+        missing_investor_symbols = set(quote_symbols) - set(investor_by_symbol)
         t_en = time.perf_counter()
         try:
             q2, investor_extra, program_by_symbol = _fetch_quote_enrichment_concurrent(
                 client,
                 quote_symbols,
-                fetch_investor_per_symbol=not have_rank_investor,
+                fetch_investor_per_symbol=bool(missing_investor_symbols),
+                investor_target_symbols=missing_investor_symbols,
                 max_workers=ew,
+                # top_by_group targets are a subset of the first probe, so their quote
+                # is already present; only program/investor enrichment is needed here.
+                fetch_quote=quote_enrichment_mode != "top_by_group",
                 fetch_program=True,
             )
             quotes_by_symbol.update(q2)
-            if not have_rank_investor:
-                investor_by_symbol = investor_extra
-                if not investor_by_symbol:
-                    print(
-                        "WARNING: investor-by-symbol fallback also returned empty rows "
-                        "(account permission / API availability issue likely).",
-                        file=sys.stderr,
-                    )
+            investor_by_symbol.update(investor_extra)
+            if missing_investor_symbols and not investor_extra:
+                print(
+                    "WARNING: investor-by-symbol fallback returned no rows "
+                    "(account permission / API availability issue likely).",
+                    file=sys.stderr,
+                )
         except Exception as exc:
             print(f"WARNING: quote enrichment: {exc}", file=sys.stderr)
         print(f"[timing] quote_enrichment (incl. per-symbol API)  {time.perf_counter() - t_en:.2f}s")
+        if args.strict_completeness:
+            missing_investor_after = sorted(set(quote_symbols) - set(investor_by_symbol))
+            if missing_investor_after:
+                raise RuntimeError(
+                    "investor enrichment incomplete: "
+                    f"missing={len(missing_investor_after)} missing_sample={missing_investor_after[:20]}"
+                )
 
     t_rows = time.perf_counter()
     major_rows = _build_rows(

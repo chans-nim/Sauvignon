@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import duckdb
@@ -36,19 +37,40 @@ def main() -> None:
         action="store_true",
         help="If meta.duckdb is missing, run summary/integrity/coverage only (skip universe checks).",
     )
+    parser.add_argument("--strict", action="store_true", help="Exit non-zero when any release-blocking quality check fails.")
+    parser.add_argument(
+        "--file-only",
+        action="store_true",
+        help="Strictly validate parquet contents without active-universe checks (for externally staged assets).",
+    )
+    parser.add_argument("--expected-min-date", default=None)
+    parser.add_argument("--expected-max-date", default=None, help="Required MAX(date), normally the collection target date.")
+    parser.add_argument("--expected-row-count", default=None)
+    parser.add_argument(
+        "--completeness-start-date",
+        default=None,
+        help="Require every expected active symbol on every observed market date from this date through MAX(date).",
+    )
+    parser.add_argument(
+        "--max-zero-volume-close-positive",
+        type=int,
+        default=-1,
+        help="Optional blocker for suspicious zero-volume rows; -1 reports without blocking.",
+    )
+    parser.add_argument("--max-missing-active-on-max-date", type=int, default=0)
     args = parser.parse_args()
 
     snapshot_path = resolve_snapshot_path(args.tag, args.file_path)
     snapshot = snapshot_path.as_posix()
     meta_available = META_DB.exists()
-    if not meta_available and not args.allow_missing_meta:
+    if not meta_available and not args.allow_missing_meta and not args.file_only:
         raise FileNotFoundError(META_DB)
 
+    issues: list[str] = []
     con = duckdb.connect()
     try:
         print("[summary]")
-        print(
-            con.execute(
+        summary = con.execute(
                 """
                 SELECT
                     COUNT(*) AS total_rows,
@@ -58,13 +80,29 @@ def main() -> None:
                 FROM read_parquet(?)
                 """,
                 [snapshot],
-            ).fetchdf().to_string(index=False)
-        )
+            ).fetchdf()
+        print(summary.to_string(index=False))
+        if summary.empty or int(summary.iloc[0]["total_rows"] or 0) <= 0:
+            issues.append("snapshot has no rows")
+        actual_row_count = 0 if summary.empty else int(summary.iloc[0]["total_rows"] or 0)
+        if args.expected_row_count and actual_row_count != int(args.expected_row_count):
+            issues.append(f"row_count mismatch: expected={args.expected_row_count} actual={actual_row_count}")
+        actual_max_date = None if summary.empty else str(summary.iloc[0]["max_date"])[:10]
+        actual_min_date = None if summary.empty else str(summary.iloc[0]["min_date"])[:10]
+        github_output = (os.getenv("GITHUB_OUTPUT") or "").strip()
+        if github_output:
+            with open(github_output, "a", encoding="utf-8") as f:
+                f.write(f"row_count={actual_row_count}\n")
+                f.write(f"min_date={actual_min_date or ''}\n")
+                f.write(f"max_date={actual_max_date or ''}\n")
+        if args.expected_min_date and actual_min_date != str(args.expected_min_date):
+            issues.append(f"min_date mismatch: expected={args.expected_min_date} actual={actual_min_date}")
+        if args.expected_max_date and actual_max_date != str(args.expected_max_date):
+            issues.append(f"max_date mismatch: expected={args.expected_max_date} actual={actual_max_date}")
         print()
 
         print("[integrity]")
-        print(
-            con.execute(
+        integrity = con.execute(
                 """
                 SELECT
                     (SELECT COUNT(*) FROM (
@@ -76,13 +114,19 @@ def main() -> None:
                     (SELECT COUNT(*) FROM read_parquet(?) WHERE close <= 0 OR volume < 0) AS invalid_price_or_volume_rows
                 """,
                 [snapshot, snapshot],
-            ).fetchdf().to_string(index=False)
-        )
+            ).fetchdf()
+        print(integrity.to_string(index=False))
+        if not integrity.empty:
+            dupes = int(integrity.iloc[0]["duplicate_symbol_date_keys"] or 0)
+            invalid = int(integrity.iloc[0]["invalid_price_or_volume_rows"] or 0)
+            if dupes:
+                issues.append(f"duplicate symbol/date keys={dupes}")
+            if invalid:
+                issues.append(f"invalid price/volume rows={invalid}")
         print()
 
         print("[zero_volume_on_max_date]")
-        print(
-            con.execute(
+        zero_stats = con.execute(
                 """
                 WITH mx AS (SELECT MAX(date) AS d FROM read_parquet(?)),
                 z AS (
@@ -97,8 +141,15 @@ def main() -> None:
                   (SELECT COUNT(*) FROM z) AS rows_on_max_date
                 """,
                 [snapshot, snapshot],
-            ).fetchdf().to_string(index=False)
-        )
+            ).fetchdf()
+        print(zero_stats.to_string(index=False))
+        if not zero_stats.empty:
+            zero_close_pos = int(zero_stats.iloc[0]["rows_vol0_close_pos"] or 0)
+            if args.max_zero_volume_close_positive >= 0 and zero_close_pos > args.max_zero_volume_close_positive:
+                issues.append(
+                    f"zero-volume rows with positive close={zero_close_pos} "
+                    f"> allowed={args.max_zero_volume_close_positive}"
+                )
         print(
             con.execute(
                 """
@@ -135,10 +186,19 @@ def main() -> None:
         )
         print()
 
+        if args.file_only:
+            if issues and args.strict:
+                raise SystemExit("snapshot validation failed: " + "; ".join(issues))
+            return
+
         if not meta_available:
             print("[universe_vs_snapshot]")
             print("(meta.duckdb not found; skipped. Re-run with meta present for full universe/short-year checks.)")
             print()
+            if args.strict:
+                issues.append("meta.duckdb is missing; active-universe completeness was not checked")
+            if issues and args.strict:
+                raise SystemExit("snapshot validation failed: " + "; ".join(issues))
             return
 
         con.execute(f"ATTACH '{META_DB.as_posix()}' AS meta (READ_ONLY)")
@@ -162,6 +222,89 @@ def main() -> None:
             ).fetchdf().to_string(index=False)
         )
         print()
+
+        print("[active_symbols_on_max_date]")
+        active_latest = con.execute(
+            """
+            WITH mx AS (
+                SELECT MAX(date)::DATE AS d FROM read_parquet(?)
+            ),
+            expected AS (
+                SELECT u.symbol
+                FROM meta.universe u, mx
+                WHERE u.is_active = TRUE
+                  AND COALESCE(u.is_trading_halt, FALSE) = FALSE
+                  AND (u.listing_date IS NULL OR u.listing_date <= mx.d)
+            ),
+            present AS (
+                SELECT DISTINCT s.symbol
+                FROM read_parquet(?) s, mx
+                WHERE CAST(s.date AS DATE) = mx.d
+            )
+            SELECT
+                (SELECT d::VARCHAR FROM mx) AS max_date,
+                (SELECT COUNT(*) FROM expected) AS expected_active_symbols,
+                (SELECT COUNT(*) FROM present) AS present_symbols,
+                (SELECT COUNT(*) FROM expected e LEFT JOIN present p USING(symbol) WHERE p.symbol IS NULL) AS missing_active_symbols
+            """,
+            [snapshot, snapshot],
+        ).fetchdf()
+        print(active_latest.to_string(index=False))
+        if not active_latest.empty:
+            missing_latest = int(active_latest.iloc[0]["missing_active_symbols"] or 0)
+            if missing_latest > args.max_missing_active_on_max_date:
+                issues.append(
+                    f"active symbols missing on max date={missing_latest} "
+                    f"> allowed={args.max_missing_active_on_max_date}"
+                )
+        print()
+
+        if args.completeness_start_date:
+            print("[active_symbol_date_completeness]")
+            range_completeness = con.execute(
+                """
+                WITH bounds AS (
+                    SELECT MAX(date)::DATE AS max_date FROM read_parquet(?)
+                ),
+                market_dates AS (
+                    SELECT DISTINCT CAST(date AS DATE) AS d
+                    FROM read_parquet(?), bounds
+                    WHERE CAST(date AS DATE) BETWEEN CAST(? AS DATE) AND bounds.max_date
+                ),
+                expected AS (
+                    SELECT d.d, u.symbol
+                    FROM market_dates d
+                    JOIN meta.universe u
+                      ON u.is_active = TRUE
+                     AND COALESCE(u.is_trading_halt, FALSE) = FALSE
+                     AND (u.listing_date IS NULL OR u.listing_date <= d.d)
+                ),
+                present AS (
+                    SELECT DISTINCT CAST(date AS DATE) AS d, symbol
+                    FROM read_parquet(?), bounds
+                    WHERE CAST(date AS DATE) BETWEEN CAST(? AS DATE) AND bounds.max_date
+                ),
+                missing AS (
+                    SELECT e.d, e.symbol
+                    FROM expected e
+                    LEFT JOIN present p USING(d, symbol)
+                    WHERE p.symbol IS NULL
+                )
+                SELECT
+                    (SELECT COUNT(*) FROM market_dates) AS observed_market_dates,
+                    (SELECT COUNT(*) FROM expected) AS expected_symbol_dates,
+                    (SELECT COUNT(*) FROM missing) AS missing_symbol_dates
+                """,
+                [snapshot, snapshot, args.completeness_start_date, snapshot, args.completeness_start_date],
+            ).fetchdf()
+            print(range_completeness.to_string(index=False))
+            if not range_completeness.empty:
+                missing_symbol_dates = int(range_completeness.iloc[0]["missing_symbol_dates"] or 0)
+                if missing_symbol_dates:
+                    issues.append(
+                        f"missing active symbol/date rows from {args.completeness_start_date}={missing_symbol_dates}"
+                    )
+            print()
 
         print("[missing_or_short_symbol_years]")
         missing_or_short = con.execute(
@@ -268,6 +411,9 @@ def main() -> None:
 
     finally:
         con.close()
+
+    if args.strict and issues:
+        raise SystemExit("snapshot validation failed: " + "; ".join(issues))
 
 
 if __name__ == "__main__":

@@ -69,12 +69,15 @@ def fetch_ohlcv_chunked(
     chunk_days: int = 365,
     existing_df: pd.DataFrame | None = None,
     coverage_threshold: float = 0.7,
+    force_fetch_end_date: bool = False,
 ) -> Tuple[pd.DataFrame, List[Tuple[str, str, dict]], List[Tuple[str, str, float]]]:
     """
     chunk_days 단위로 나눠, 이미 기존 데이터(existing_df)로 충분히 채워진 청크는 API 호출 없이
     재사용하고, 부족한 청크만 API 호출 후 결과를 합쳐 반환한다.
     - existing_df: 기존 silver에서 읽은 구간 데이터 (없으면 None).
     - coverage_threshold: 청크 내 기대 거래일 대비 기존 데이터 비율이 이 값 이상이면 API 스킵 (0.7 = 70%).
+    - force_fetch_end_date: end_date가 포함된 마지막 청크는 기존 데이터가 있어도 반드시 다시 조회한다.
+      장중 데이터가 이미 존재한다는 이유로 마감 시세 갱신을 건너뛰지 않기 위한 옵션이다.
     반환: (combined_df, fetched_payloads, skipped_with_ratio)
           skipped_with_ratio = [(c_start, c_end, ratio), ...]  # 스킵된 청크와 그 커버리지 비율.
     """
@@ -82,7 +85,8 @@ def fetch_ohlcv_chunked(
     raw_payloads: List[Tuple[str, str, dict]] = []
     skipped_with_ratio: List[Tuple[str, str, float]] = []
     for c_start, c_end in chunk_date_ranges(start_date, end_date, chunk_days):
-        if existing_df is not None and not existing_df.empty:
+        must_fetch = force_fetch_end_date and c_start <= end_date <= c_end
+        if not must_fetch and existing_df is not None and not existing_df.empty:
             ratio = _chunk_coverage_ratio(existing_df, c_start, c_end)
             if ratio >= coverage_threshold:
                 start_d = pd.to_datetime(c_start).normalize()

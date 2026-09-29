@@ -12,7 +12,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: collect-theme-sector-data
+  # KIS credentials and dataset publication are shared with snapshot workflows.
+  group: dataset-release
   cancel-in-progress: false
 
 jobs:
@@ -29,10 +30,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
       - name: Collect theme sector data
@@ -45,7 +46,11 @@ jobs:
           TELEGRAM_CHAT_ID_STOCK: ${{ secrets.TELEGRAM_CHAT_ID_STOCK }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
         run: |
-          python -m scripts.collect_thema_sector_data --enrichment-workers 6 --telegram
+          python -m scripts.collect_thema_sector_data \
+            --theme-history-sync-max-releases 5 \
+            --enrichment-workers 6 \
+            --strict-completeness \
+            --telegram
 
       - name: Compute release tag (KST)
         id: rel

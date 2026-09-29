@@ -380,7 +380,9 @@ def sync_theme_snapshots(
             with tempfile.TemporaryDirectory(prefix="theme-history-asset-") as td:
                 tmp_path = Path(td) / name
                 download_asset_by_api(repo, snap, tmp_path)
-                written = expand_combined_snapshot_to_daily_files(tmp_path, dest_dir, overwrite=False)
+                # Tags are processed oldest -> newest, so corrected rows from the newest
+                # combined snapshot must replace older copies of the same trading date.
+                written = expand_combined_snapshot_to_daily_files(tmp_path, dest_dir, overwrite=True)
             print(
                 f"[sync-theme-history] {tag} -> {THEME_HISTORY_SNAPSHOT_ASSET} "
                 f"expanded to {len(written)} daily snapshot(s)"

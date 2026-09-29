@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
+import pandas as pd
 from src.clients.kis_auth import get_client
 from src.collect.base_collect import fetch_ohlcv_chunked, validate_ohlcv
 from src.storage import meta_store, parquet_store
@@ -23,6 +24,7 @@ def collect_one(
     *,
     use_existing: bool = True,
     coverage_threshold: float = 0.7,
+    require_end_date: bool = False,
 ) -> tuple[str, bool, str | None]:
     """
     요청 구간을 chunk_days 단위로 나누고, 기존 silver에 이미 충분히 있는 청크는 API 호출 없이
@@ -51,6 +53,11 @@ def collect_one(
         for c_start, _c_end, payload in raw_payloads:
             parquet_store.save_raw_json(symbol, payload, suffix=c_start.replace("-", ""))
         df = validate_ohlcv(combined)
+        if require_end_date:
+            target = pd.Timestamp(end_date).normalize()
+            has_target = not df.empty and (pd.to_datetime(df["date"]).dt.normalize() == target).any()
+            if not has_target:
+                raise RuntimeError(f"KIS response has no valid row for required target date {end_date}")
         parquet_store.upsert_ohlcv_from_df(df)
         last_date = None if df.empty else df["date"].max().strftime("%Y-%m-%d")
         meta_store.upsert_collect_state(symbol, True, last_date, None)

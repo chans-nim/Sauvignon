@@ -10,6 +10,11 @@ on:
         description: "Release type: delta | snapshot | full"
         required: true
         default: "delta"
+        type: choice
+        options:
+          - delta
+          - snapshot
+          - full
       asset_url:
         description: "HTTPS URL to release asset"
         required: false
@@ -36,7 +41,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-release
+  group: dataset-release
   cancel-in-progress: false
 
 jobs:
@@ -46,51 +51,47 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Acquire lock
+      - name: Validate release metadata
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
-          python3 - << 'PY'
-          import json, os, datetime
-          from pathlib import Path
-          lock_path = Path("LOCK.json")
-          now = datetime.datetime.now(datetime.timezone.utc)
-          if lock_path.exists():
-              lock = json.loads(lock_path.read_text(encoding="utf-8"))
-              exp = lock.get("expires_at")
-              if lock.get("locked") and exp:
-                  exp_dt = datetime.datetime.fromisoformat(exp.replace("Z","+00:00"))
-                  if exp_dt > now:
-                      raise SystemExit(f"LOCKED by {lock.get('owner')} until {exp_dt.isoformat()}")
-          lock = {
-              "locked": True,
-              "owner": "github-actions",
-              "run_id": os.environ.get("GITHUB_RUN_ID"),
-              "started_at": now.isoformat().replace("+00:00","Z"),
-              "expires_at": (now + datetime.timedelta(hours=2)).isoformat().replace("+00:00","Z")
+          set -euo pipefail
+          [[ "$TAG" =~ ^data-${RELEASE_TYPE}-[0-9]{8}(-[0-9]{4})?$ ]] || {
+            echo "Tag does not match release type/date format: $TAG"
+            exit 1
           }
-          lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
-          PY
-          git add LOCK.json
-          git commit -m "chore: acquire lock" || true
-          git push || true
 
       - name: Download asset from staging
         env:
           ASSET_URL: ${{ inputs.asset_url }}
           DELTA_URL: ${{ inputs.delta_url }}
+          ASSET_NAME: ${{ inputs.asset_name }}
           STAGING_AUTH_HEADER: ${{ secrets.STAGING_AUTH_HEADER }}
         run: |
           set -euo pipefail
           mkdir -p _tmp
           url="${ASSET_URL:-$DELTA_URL}"
-          fname="${{ inputs.asset_name }}"
+          fname="${ASSET_NAME}"
           if [ -z "${fname}" ]; then
             fname="$(basename "${url%%\?*}")"
           fi
+          fname="$(basename "$fname")"
+          test -n "$url" && test -n "$fname"
           if [ -n "${STAGING_AUTH_HEADER:-}" ]; then
             curl -L --fail -H "${STAGING_AUTH_HEADER}" -o "_tmp/$fname" "$url"
           else
@@ -107,9 +108,21 @@ jobs:
           got="$(sha256sum "_tmp/$fname" | awk '{print $1}')"
           test "$got" = "$EXPECTED"
 
+      - name: Validate staged parquet
+        id: validate
+        run: |
+          fname="$(cat _tmp/asset_name.txt)"
+          python -m scripts.validate_snapshot \
+            --file-path "_tmp/$fname" \
+            --strict \
+            --file-only \
+            --expected-row-count "${{ inputs.row_count }}" \
+            --expected-min-date "${{ inputs.min_date }}" \
+            --expected-max-date "${{ inputs.max_date }}"
+
       - name: Create release if not exists
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
           TAG: ${{ inputs.tag }}
           RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
@@ -122,7 +135,7 @@ jobs:
 
       - name: Upload release asset
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
           TAG: ${{ inputs.tag }}
         run: |
           fname="$(cat _tmp/asset_name.txt)"
@@ -137,9 +150,9 @@ jobs:
           TAG: ${{ inputs.tag }}
           RELEASE_TYPE: ${{ inputs.release_type }}
           ASSET_SHA256: ${{ inputs.sha256 }}
-          MIN_DATE: ${{ inputs.min_date }}
-          MAX_DATE: ${{ inputs.max_date }}
-          ROW_COUNT: ${{ inputs.row_count }}
+          MIN_DATE: ${{ steps.validate.outputs.min_date }}
+          MAX_DATE: ${{ steps.validate.outputs.max_date }}
+          ROW_COUNT: ${{ steps.validate.outputs.row_count }}
         run: |
           python3 - << 'PY'
           import json, os
@@ -174,21 +187,9 @@ jobs:
           path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
           git add data_manifest.json
-          git commit -m "data: update manifest for $TAG" || true
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged"
+          else
+            git commit -m "data: update manifest for $TAG"
+          fi
           git push
-
-      - name: Release lock
-        if: always()
-        run: |
-          python3 - << 'PY'
-          import json
-          from pathlib import Path
-          lock_path = Path("LOCK.json")
-          if lock_path.exists():
-              lock = json.loads(lock_path.read_text(encoding="utf-8"))
-              lock["locked"] = False
-              lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
-          PY
-          git add LOCK.json
-          git commit -m "chore: release lock" || true
-          git push || true
