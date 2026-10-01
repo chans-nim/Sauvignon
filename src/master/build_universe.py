@@ -3,6 +3,10 @@ import argparse
 import pandas as pd
 from src.common.settings import settings
 from src.common.logger import get_logger
+from src.master.universe_policy import (
+    UNSUPPORTED_SYMBOL_ASSET_TYPE,
+    classify_daily_asset_type,
+)
 from src.storage import meta_store
 
 log = get_logger(__name__)
@@ -23,7 +27,7 @@ def main() -> None:
     kospi = load_master("kospi_master.parquet")
     kosdaq = load_master("kosdaq_master.parquet")
     df = pd.concat([kospi, kosdaq], ignore_index=True)
-    df["asset_type"] = "stock"
+    df["asset_type"] = df["symbol"].map(classify_daily_asset_type)
     df["listing_date"] = pd.NaT
     df["is_etf"] = False
     df["is_spac"] = df["name"].fillna("").str.contains("스팩", na=False)
@@ -39,6 +43,14 @@ def main() -> None:
     meta_store.ensure_tables()
     meta_store.replace_universe(df)
     log.info("universe saved=%s rows=%s", OUT_PATH, len(df))
+    unsupported = df[df["asset_type"] == UNSUPPORTED_SYMBOL_ASSET_TYPE]
+    if not unsupported.empty:
+        sample = unsupported[["symbol", "name", "market"]].head(10).to_dict("records")
+        log.warning(
+            "retained but excluded from KIS daily collection: count=%s sample=%s",
+            len(unsupported),
+            sample,
+        )
 
 if __name__ == "__main__":
     main()

@@ -3,6 +3,7 @@ import time
 import duckdb
 import pandas as pd
 from src.common.settings import settings
+from src.master.universe_policy import collectible_universe_sql
 
 META_DB = settings.project_root / "meta" / "meta.duckdb"
 META_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +100,10 @@ def replace_universe(df: pd.DataFrame) -> None:
 
 def load_universe(limit: int | None = None) -> pd.DataFrame:
     con = connect()
-    sql = "SELECT symbol,name,market FROM universe WHERE is_active = TRUE ORDER BY market,symbol"
+    sql = (
+        "SELECT symbol,name,market FROM universe "
+        f"WHERE {collectible_universe_sql()} ORDER BY market,symbol"
+    )
     if limit:
         sql += f" LIMIT {int(limit)}"
     df = con.execute(sql).fetchdf()
@@ -113,11 +117,11 @@ def load_failed_symbols(timeframe: str = "1d") -> pd.DataFrame:
     반환 컬럼: symbol, name, market (universe와 동일).
     """
     con = connect()
-    df = con.execute("""
+    df = con.execute(f"""
         SELECT u.symbol, u.name, u.market
         FROM universe u
         INNER JOIN collect_state c ON u.symbol = c.symbol AND c.timeframe = ?
-        WHERE u.is_active = TRUE AND c.last_error IS NOT NULL
+        WHERE {collectible_universe_sql('u')} AND c.last_error IS NOT NULL
         ORDER BY u.market, u.symbol
     """, [timeframe]).fetchdf()
     con.close()

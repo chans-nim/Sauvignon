@@ -16,6 +16,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.common.settings import settings
+from src.master.universe_policy import collectible_universe_sql
 
 DEFAULT_REPO = "chans-nim/Sauvignon"
 DEFAULT_RELEASES_URL = "https://github.com/chans-nim/Sauvignon/releases"
@@ -440,8 +441,10 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
         if meta_exists:
             con.execute(f"ATTACH '{META_DB.as_posix()}' AS meta (READ_ONLY)")
             uv = con.execute(
-                """
-                WITH active AS (SELECT symbol FROM meta.universe WHERE is_active = TRUE),
+                f"""
+                WITH active AS (
+                    SELECT symbol FROM meta.universe u WHERE {collectible_universe_sql('u')}
+                ),
                      snap AS (SELECT DISTINCT symbol FROM read_parquet(?))
                 SELECT
                     (SELECT COUNT(*) FROM active) AS active,
@@ -456,7 +459,7 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
 
             # Short/missing 판정은 validate_snapshot 로직과 동일하게 맞춘다.
             short_df = con.execute(
-                """
+                f"""
                 WITH first_seen AS (
                     SELECT symbol, MIN(date) AS first_date
                     FROM read_parquet(?)
@@ -472,7 +475,7 @@ def run_validation(parquet_path: Path, meta_exists: bool) -> dict:
                         year(COALESCE(u.listing_date, f.first_date, CAST(? AS DATE))) AS effective_start_year
                     FROM meta.universe u
                     LEFT JOIN first_seen f ON u.symbol = f.symbol
-                    WHERE u.is_active = TRUE
+                    WHERE {collectible_universe_sql('u')}
                 ),
                 years AS (
                     SELECT * FROM generate_series(year(CAST(? AS DATE)), year(CAST(? AS DATE)))

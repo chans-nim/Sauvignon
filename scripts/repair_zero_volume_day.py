@@ -26,6 +26,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
 from src.collect.collect_backfill import collect_one
 from src.common.logger import get_logger
 from src.common.settings import settings
+from src.master.universe_policy import collectible_universe_sql
 from src.storage import meta_store
 from src.transform.build_snapshot import silver_parquet_paths
 
@@ -51,7 +52,7 @@ def load_zero_volume_candidates(
         q = f"""
             SELECT DISTINCT s.symbol, s.market, u.name
             FROM read_parquet(?) AS s
-            INNER JOIN meta.universe u ON u.symbol = s.symbol AND u.is_active = TRUE
+            INNER JOIN meta.universe u ON u.symbol = s.symbol AND {collectible_universe_sql('u')}
             WHERE CAST(s.date AS DATE) = CAST(? AS DATE)
               AND {vol_filter}
               {close_filter}
@@ -91,7 +92,7 @@ def load_low_volume_candidates(
     con = duckdb.connect()
     try:
         con.execute(f"ATTACH '{META_DB.as_posix()}' AS meta (READ_ONLY)")
-        q = """
+        q = f"""
             WITH today AS (
               SELECT symbol, market, CAST(volume AS BIGINT) AS volume, close
               FROM read_parquet(?)
@@ -121,14 +122,14 @@ def load_low_volume_candidates(
               END AS volume_ratio
             FROM today t
             INNER JOIN hist h ON h.symbol = t.symbol
-            INNER JOIN meta.universe u ON u.symbol = t.symbol AND u.is_active = TRUE
+            INNER JOIN meta.universe u ON u.symbol = t.symbol AND {collectible_universe_sql('u')}
             WHERE COALESCE(t.volume, 0) > 0
               AND h.baseline_volume >= ?::BIGINT
               AND h.history_points >= ?::BIGINT
               AND CAST(t.volume AS DOUBLE) <= h.baseline_volume * ?::DOUBLE
               {close_filter}
             ORDER BY volume_ratio ASC, t.symbol
-        """.format(close_filter=close_filter)
+        """
         return con.execute(
             q,
             [paths, target, paths, target, target, lookback_days, min_baseline_volume, min_history_points, ratio_threshold],

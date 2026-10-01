@@ -1217,11 +1217,29 @@ def _build_investor_by_symbol(flow_rows: list[dict[str, Any]]) -> dict[str, dict
         sym = _norm_kis_stock_symbol(row.get("symbol", ""))
         if not sym:
             continue
-        out[sym] = {
+        item = {
             "foreign_net_tr_pbmn": row.get("foreign_net_tr_pbmn"),
             "institution_net_tr_pbmn": row.get("institution_net_tr_pbmn"),
         }
+        # Do not let a structurally present but empty ranking row suppress the
+        # per-symbol fallback. Zero is a valid value; None means not collected.
+        if item["foreign_net_tr_pbmn"] is None and item["institution_net_tr_pbmn"] is None:
+            continue
+        out[sym] = item
     return out
+
+
+def _missing_investor_symbols(
+    required_symbols: list[str] | set[str],
+    investor_by_symbol: dict[str, dict[str, Any]],
+) -> list[str]:
+    missing: list[str] = []
+    for raw_symbol in required_symbols:
+        symbol = _norm_kis_stock_symbol(raw_symbol)
+        item = investor_by_symbol.get(symbol) or {}
+        if item.get("foreign_net_tr_pbmn") is None and item.get("institution_net_tr_pbmn") is None:
+            missing.append(symbol)
+    return sorted(set(missing))
 
 
 def _fetch_quote_enrichment_concurrent(
@@ -2897,7 +2915,7 @@ def main() -> None:
     quotes_by_symbol: dict[str, dict[str, Any]] = dict(probe_quotes)
     program_by_symbol: dict[str, dict[str, Any]] = {}
     if quote_enrichment:
-        missing_investor_symbols = set(quote_symbols) - set(investor_by_symbol)
+        missing_investor_symbols = set(_missing_investor_symbols(quote_symbols, investor_by_symbol))
         t_en = time.perf_counter()
         try:
             q2, investor_extra, program_by_symbol = _fetch_quote_enrichment_concurrent(
@@ -2923,12 +2941,38 @@ def main() -> None:
             print(f"WARNING: quote enrichment: {exc}", file=sys.stderr)
         print(f"[timing] quote_enrichment (incl. per-symbol API)  {time.perf_counter() - t_en:.2f}s")
         if args.strict_completeness:
-            missing_investor_after = sorted(set(quote_symbols) - set(investor_by_symbol))
+            missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol)
             if missing_investor_after:
-                raise RuntimeError(
+                print(
+                    "[enrichment] retrying investor-only missing symbols: "
+                    f"{len(missing_investor_after)}/{len(quote_symbols)}"
+                )
+                _unused_quotes, investor_retry, _unused_program = _fetch_quote_enrichment_concurrent(
+                    client,
+                    missing_investor_after,
+                    fetch_investor_per_symbol=True,
+                    investor_target_symbols=set(missing_investor_after),
+                    max_workers=ew,
+                    fetch_quote=False,
+                    fetch_program=False,
+                    log_label="[investor-retry]",
+                )
+                investor_by_symbol.update(investor_retry)
+                missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol)
+            print(
+                "[coverage] investor "
+                f"complete={len(quote_symbols) - len(missing_investor_after)}/{len(quote_symbols)} "
+                f"missing={len(missing_investor_after)}"
+            )
+            if missing_investor_after:
+                message = (
                     "investor enrichment incomplete: "
                     f"missing={len(missing_investor_after)} missing_sample={missing_investor_after[:20]}"
+                    "; KIS inquire-investor same-day data is available only after market close"
                 )
+                if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
+                    print(f"::error title=Investor enrichment incomplete::{message}", file=sys.stderr)
+                raise RuntimeError(message)
 
     t_rows = time.perf_counter()
     major_rows = _build_rows(
@@ -3136,6 +3180,9 @@ def main() -> None:
         "live_signal_symbol_count": len(live_signal_map),
         "quote_symbol_count": len(quotes_by_symbol),
         "foreign_institution_rank_symbol_count": len(investor_by_symbol),
+        "foreign_institution_missing_symbol_count": len(
+            _missing_investor_symbols(quote_symbols, investor_by_symbol)
+        ),
         "program_trade_symbol_count": len(program_by_symbol),
         "quote_enrichment_mode": quote_enrichment_mode,
         "quote_enrichment_api_target_count": len(quote_symbols),

@@ -14,6 +14,12 @@ from scripts.prepare_snapshot_rerelease import prepare_bundle
 from scripts.run_daily_collect import resolve_collection_target_date, run_incremental_and_gap_fill
 from src.collect import collect_daily
 from src.collect.base_collect import fetch_ohlcv_chunked
+from src.master.universe_policy import (
+    UNSUPPORTED_SYMBOL_ASSET_TYPE,
+    classify_daily_asset_type,
+    collectible_universe_sql,
+    is_kis_daily_collectible_symbol,
+)
 
 
 class _DailyClient:
@@ -131,6 +137,33 @@ def test_delayed_early_morning_run_targets_previous_weekday() -> None:
     assert resolve_collection_target_date(datetime(2026, 9, 28, 16, 30, tzinfo=kst)) == date(2026, 9, 28)
 
 
+def test_kis_daily_scope_keeps_normal_symbols_and_rejects_master_product_codes() -> None:
+    assert is_kis_daily_collectible_symbol("005930") is True
+    assert is_kis_daily_collectible_symbol(" 005930 ") is True
+    assert is_kis_daily_collectible_symbol("Q76012348") is False
+    assert is_kis_daily_collectible_symbol("12345") is False
+    assert classify_daily_asset_type("Q76012348") == UNSUPPORTED_SYMBOL_ASSET_TYPE
+
+
+def test_collectible_universe_sql_uses_same_scope_as_python_policy() -> None:
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.execute("CREATE TABLE universe(symbol TEXT, is_active BOOLEAN)")
+        con.executemany(
+            "INSERT INTO universe VALUES (?, ?)",
+            [("005930", True), ("Q76012348", True), ("000660", False)],
+        )
+        actual = con.execute(
+            f"SELECT symbol FROM universe u WHERE {collectible_universe_sql('u')} ORDER BY symbol"
+        ).fetchall()
+    finally:
+        con.close()
+
+    assert actual == [("005930",)]
+
+
 def test_gap_fill_failure_blocks_downstream_publish() -> None:
     with pytest.raises(RuntimeError, match="gap fill incomplete"):
         run_incremental_and_gap_fill(
@@ -174,6 +207,86 @@ def test_strict_file_validation_blocks_duplicate_release_rows(tmp_path, monkeypa
 
     with pytest.raises(SystemExit, match="duplicate symbol/date keys=1"):
         validate_snapshot.main()
+
+
+def _write_validation_meta(path, symbols: list[str]) -> None:
+    import duckdb
+
+    con = duckdb.connect(str(path))
+    try:
+        con.execute(
+            """
+            CREATE TABLE universe (
+                symbol TEXT,
+                name TEXT,
+                market TEXT,
+                asset_type TEXT,
+                listing_date DATE,
+                is_trading_halt BOOLEAN,
+                is_active BOOLEAN
+            )
+            """
+        )
+        con.executemany(
+            "INSERT INTO universe VALUES (?, ?, 'KOSPI', 'stock', NULL, FALSE, TRUE)",
+            [(symbol, symbol) for symbol in symbols],
+        )
+    finally:
+        con.close()
+
+
+def _run_strict_universe_validation(monkeypatch, snapshot, meta_db) -> None:
+    monkeypatch.setattr(validate_snapshot, "META_DB", meta_db)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "validate_snapshot",
+            "--file-path",
+            str(snapshot),
+            "--strict",
+            "--target-start",
+            "2026-09-30",
+            "--target-end",
+            "2026-09-30",
+            "--min-rows-per-year",
+            "1",
+            "--expected-max-date",
+            "2026-09-30",
+            "--completeness-start-date",
+            "2026-09-30",
+        ],
+    )
+    validate_snapshot.main()
+
+
+def test_strict_validation_excludes_only_non_collectible_master_codes(tmp_path, monkeypatch) -> None:
+    snapshot = tmp_path / "snapshot.parquet"
+    pd.DataFrame(
+        [
+            {
+                "symbol": "005930",
+                "market": "KOSPI",
+                "date": pd.Timestamp("2026-09-30"),
+                "open": 100,
+                "high": 110,
+                "low": 90,
+                "close": 105,
+                "volume": 10,
+                "value": 1000,
+                "ingested_at": pd.Timestamp("2026-09-30T16:30:00"),
+            }
+        ]
+    ).to_parquet(snapshot, index=False)
+
+    supported_meta = tmp_path / "supported-meta.duckdb"
+    _write_validation_meta(supported_meta, ["005930", "Q76012348"])
+    _run_strict_universe_validation(monkeypatch, snapshot, supported_meta)
+
+    missing_normal_meta = tmp_path / "missing-normal-meta.duckdb"
+    _write_validation_meta(missing_normal_meta, ["005930", "000660", "Q76012348"])
+    with pytest.raises(SystemExit, match="active symbols missing on max date=1"):
+        _run_strict_universe_validation(monkeypatch, snapshot, missing_normal_meta)
 
 
 def test_prepare_rerelease_renames_bundle_and_refreshes_companion_metadata(tmp_path) -> None:

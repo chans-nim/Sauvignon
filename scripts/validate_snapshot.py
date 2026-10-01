@@ -8,6 +8,7 @@ import duckdb
 
 from src.collect.gap_detect import MIN_ROWS_PER_YEAR
 from src.common.settings import settings
+from src.master.universe_policy import collectible_universe_sql
 
 SNAPSHOT_DIR = settings.project_root / "data" / "snapshot"
 META_DB = settings.project_root / "meta" / "meta.duckdb"
@@ -206,9 +207,9 @@ def main() -> None:
         print("[universe_vs_snapshot]")
         print(
             con.execute(
-                """
+                f"""
                 WITH active AS (
-                    SELECT symbol FROM meta.universe WHERE is_active = TRUE
+                    SELECT symbol FROM meta.universe u WHERE {collectible_universe_sql('u')}
                 ),
                 snapshot_symbols AS (
                     SELECT DISTINCT symbol FROM read_parquet(?)
@@ -225,14 +226,14 @@ def main() -> None:
 
         print("[active_symbols_on_max_date]")
         active_latest = con.execute(
-            """
+            f"""
             WITH mx AS (
                 SELECT MAX(date)::DATE AS d FROM read_parquet(?)
             ),
             expected AS (
                 SELECT u.symbol
                 FROM meta.universe u, mx
-                WHERE u.is_active = TRUE
+                WHERE {collectible_universe_sql('u')}
                   AND COALESCE(u.is_trading_halt, FALSE) = FALSE
                   AND (u.listing_date IS NULL OR u.listing_date <= mx.d)
             ),
@@ -262,7 +263,7 @@ def main() -> None:
         if args.completeness_start_date:
             print("[active_symbol_date_completeness]")
             range_completeness = con.execute(
-                """
+                f"""
                 WITH bounds AS (
                     SELECT MAX(date)::DATE AS max_date FROM read_parquet(?)
                 ),
@@ -275,7 +276,7 @@ def main() -> None:
                     SELECT d.d, u.symbol
                     FROM market_dates d
                     JOIN meta.universe u
-                      ON u.is_active = TRUE
+                      ON {collectible_universe_sql('u')}
                      AND COALESCE(u.is_trading_halt, FALSE) = FALSE
                      AND (u.listing_date IS NULL OR u.listing_date <= d.d)
                 ),
@@ -308,7 +309,7 @@ def main() -> None:
 
         print("[missing_or_short_symbol_years]")
         missing_or_short = con.execute(
-            """
+            f"""
             WITH first_seen AS (
                 SELECT symbol, MIN(date) AS first_date
                 FROM read_parquet(?)
@@ -324,7 +325,7 @@ def main() -> None:
                     year(COALESCE(u.listing_date, f.first_date, CAST(? AS DATE))) AS effective_start_year
                 FROM meta.universe u
                 LEFT JOIN first_seen f ON u.symbol = f.symbol
-                WHERE u.is_active = TRUE
+                WHERE {collectible_universe_sql('u')}
             ),
             years AS (
                 SELECT * FROM generate_series(year(CAST(? AS DATE)), year(CAST(? AS DATE)))
@@ -378,7 +379,7 @@ def main() -> None:
             (2025, "2025-01-01", "2025-12-31"),
         ]:
             missing = con.execute(
-                """
+                f"""
                 WITH first_seen AS (
                     SELECT symbol, MIN(date) AS first_date
                     FROM read_parquet(?)
@@ -388,7 +389,7 @@ def main() -> None:
                     SELECT u.symbol
                     FROM meta.universe u
                     LEFT JOIN first_seen f USING(symbol)
-                    WHERE u.is_active = TRUE
+                    WHERE {collectible_universe_sql('u')}
                       AND COALESCE(u.listing_date, f.first_date, CAST(? AS DATE)) <= CAST(? AS DATE)
                 ),
                 present AS (

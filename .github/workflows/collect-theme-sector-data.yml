@@ -3,10 +3,14 @@
 # - 수집 후 theme-sector- 태그로 릴리즈한다.
 name: Collect theme sector data
 
+# KIS inquire-investor exposes same-day data only after market close. Run after
+# the 20:00 KST alternative-market close so strict enrichment sees final data.
+# 20:30 also avoids competing with the 20:15 snapshot refresh schedule.
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 7 * * 1-5"
+    - cron: "30 11 * * 1-5" # KST 20:30
 
 permissions:
   contents: write

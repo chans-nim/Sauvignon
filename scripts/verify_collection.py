@@ -12,6 +12,7 @@ if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in
 
 import duckdb
 from src.common.settings import settings
+from src.master.universe_policy import collectible_universe_sql
 from src.storage.meta_store import ensure_tables
 
 PROJECT_ROOT = settings.project_root
@@ -44,22 +45,26 @@ def main() -> None:
     print("2. collect_state 요약 (1d)")
     print("=" * 60)
     try:
-        summary = con_meta.execute("""
+        summary = con_meta.execute(f"""
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN last_success_date IS NOT NULL THEN 1 ELSE 0 END) AS success_cnt,
                 SUM(CASE WHEN last_error IS NOT NULL THEN 1 ELSE 0 END) AS error_cnt,
                 MIN(last_success_date) AS min_date,
                 MAX(last_success_date) AS max_date
-            FROM collect_state
-            WHERE timeframe = '1d'
+            FROM collect_state c
+            INNER JOIN universe u ON u.symbol = c.symbol
+            WHERE c.timeframe = '1d' AND {collectible_universe_sql('u')}
         """).fetchdf()
         print(summary.to_string(index=False))
-        failed = con_meta.execute("""
-            SELECT symbol, last_success_date, last_error
-            FROM collect_state
-            WHERE timeframe = '1d' AND last_error IS NOT NULL
-            ORDER BY updated_at DESC
+        failed = con_meta.execute(f"""
+            SELECT c.symbol, c.last_success_date, c.last_error
+            FROM collect_state c
+            INNER JOIN universe u ON u.symbol = c.symbol
+            WHERE c.timeframe = '1d'
+              AND c.last_error IS NOT NULL
+              AND {collectible_universe_sql('u')}
+            ORDER BY c.updated_at DESC
             LIMIT 10
         """).fetchdf()
         if not failed.empty:
@@ -72,8 +77,14 @@ def main() -> None:
     print("3. universe vs collect_state (활성 종목 대비 수집 상태)")
     print("=" * 60)
     try:
-        u = con_meta.execute("SELECT COUNT(*) AS c FROM universe WHERE is_active = TRUE").fetchone()[0]
+        all_active = con_meta.execute(
+            "SELECT COUNT(*) AS c FROM universe WHERE is_active = TRUE"
+        ).fetchone()[0]
+        u = con_meta.execute(
+            f"SELECT COUNT(*) AS c FROM universe WHERE {collectible_universe_sql()}"
+        ).fetchone()[0]
         c = con_meta.execute("SELECT COUNT(*) FROM collect_state WHERE timeframe = '1d'").fetchone()[0]
+        print(f"  excluded_nonstandard: {all_active - u}, collect_state(1d/all history): {c}")
         print(f"  universe(활성): {u}, collect_state(1d): {c}")
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -156,7 +167,9 @@ def main() -> None:
                 print(by_year.to_string(index=False))
             # 전체 기대 종목 수 (universe)
             _con_meta = duckdb.connect(META_DB.as_posix(), read_only=True)
-            n_universe = _con_meta.execute("SELECT COUNT(*) FROM universe WHERE is_active = TRUE").fetchone()[0]
+            n_universe = _con_meta.execute(
+                f"SELECT COUNT(*) FROM universe WHERE {collectible_universe_sql()}"
+            ).fetchone()[0]
             _con_meta.close()
             # 2016년에 데이터가 있는 종목 수 vs 기대
             row_2016 = con.execute("""
@@ -202,7 +215,9 @@ def main() -> None:
                 SELECT DISTINCT symbol FROM read_parquet(?)
                 WHERE date >= '2025-01-01' AND date <= '2025-12-31'
             """, [paths]).fetchdf()["symbol"].tolist())
-            active = con.execute("SELECT symbol FROM meta.universe WHERE is_active = TRUE").fetchdf()["symbol"].tolist()
+            active = con.execute(
+                f"SELECT symbol FROM meta.universe u WHERE {collectible_universe_sql('u')}"
+            ).fetchdf()["symbol"].tolist()
             active_set = set(active)
             no_2016 = sorted(active_set - have_2016)
             no_2025 = sorted(active_set - have_2025)

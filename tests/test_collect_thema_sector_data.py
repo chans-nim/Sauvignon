@@ -11,12 +11,14 @@ if str(ROOT) not in sys.path:
 from scripts.collect_thema_sector_data import (
     _all_unique_stock_symbols_from_groups,
     _build_group_blueprints,
+    _build_investor_by_symbol,
     _build_rows,
     _build_theme_metric_history_rows,
     _build_theme_history_snapshot_rows,
     _combine_theme_history_dirs,
     _build_theme_daily_leader_history_sections,
     _load_theme_history_rows,
+    _missing_investor_symbols,
     _recent_history_gap_days,
     _render_theme_history_calendar_html,
     _theme_history_local_summary,
@@ -30,6 +32,30 @@ from scripts.collect_thema_sector_data import (
     _validate_classification_data,
 )
 from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
+
+
+def test_investor_coverage_does_not_treat_blank_ranking_rows_as_complete() -> None:
+    investor_map = _build_investor_by_symbol(
+        [
+            {
+                "symbol": "005930",
+                "foreign_net_tr_pbmn": None,
+                "institution_net_tr_pbmn": None,
+            },
+            {
+                "symbol": "000660",
+                "foreign_net_tr_pbmn": 0,
+                "institution_net_tr_pbmn": 0,
+            },
+        ]
+    )
+
+    assert "005930" not in investor_map
+    assert investor_map["000660"] == {
+        "foreign_net_tr_pbmn": 0,
+        "institution_net_tr_pbmn": 0,
+    }
+    assert _missing_investor_symbols(["005930", "000660"], investor_map) == ["005930"]
 
 
 def test_build_thema_rows_and_render_html() -> None:

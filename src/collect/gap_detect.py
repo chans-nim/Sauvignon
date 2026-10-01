@@ -11,6 +11,7 @@ import duckdb
 import pandas as pd
 
 from src.common.settings import settings
+from src.master.universe_policy import collectible_universe_sql
 from src.storage import meta_store
 
 SILVER_DIR = settings.project_root / "data" / "lake" / "silver" / "ohlcv_daily"
@@ -85,10 +86,10 @@ def get_gaps(
     meta_store.ensure_tables()
     con_meta = meta_store.connect()
     try:
-        universe_df = con_meta.execute("""
+        universe_df = con_meta.execute(f"""
             SELECT symbol, name, market, listing_date
             FROM universe
-            WHERE is_active = TRUE
+            WHERE {collectible_universe_sql()}
             ORDER BY market, symbol
         """).fetchdf()
     finally:
