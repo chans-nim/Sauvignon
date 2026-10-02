@@ -848,10 +848,12 @@ def _calendar_display_by_date(
     """
     raw_by_d = _group_snapshot_rows_by_date(history_rows)
     out: dict[str, list[dict[str, Any]]] = {}
-    cur = month_first
     lim = max(1, int(repr_stocks))
     ft = max(1, int(fallback_top))
-    while cur <= month_last:
+    # Include the leading/trailing days rendered in the month grid. Previously
+    # this stopped at the calendar month's bounds, so history existed in the
+    # detail section but disappeared from the previous-month cells.
+    for cur in _iter_month_calendar_cells(month_first, month_last):
         key = cur.isoformat()
         prim = list(leader_by_date.get(key) or [])
         if prim:
@@ -860,7 +862,6 @@ def _calendar_display_by_date(
             rows = list(raw_by_d.get(key) or [])
             if rows:
                 out[key] = [_snapshot_row_to_calendar_ent(r, lim=lim) for r in rows[:ft]]
-        cur += _dt.timedelta(days=1)
     return out
 
 
@@ -950,29 +951,28 @@ def _render_theme_history_calendar_html(
         if cell_d.weekday() >= 5:
             cls += " weekend"
         parts.append(f"<div class=\"{cls}\"><div class=\"cal-daynum\">{cell_d.day}</div>")
-        if in_month:
-            ents = by_date.get(key, [])
-            if ents:
-                parts.append('<div class="cal-lines">')
-                for e in ents[: max(1, int(max_lines_per_cell))]:
-                    path = str(e.get("display_path") or "-")
-                    path_d = path if len(path) <= 18 else path[:16] + "…"
-                    theme_cls = _calendar_theme_class(path)
-                    stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
-                    st_raw = str(e.get("leader_status") or "").strip()
-                    tag_html = ""
-                    if st_raw and st_raw != "주도":
-                        tag_html = f" <span class=\"cal-tag\">{_escape_html(st_raw)}</span>"
-                    if stk:
-                        nm = _escape_html(str(stk.get("name") or stk.get("symbol") or "-"))
-                        sym = _escape_html(str(stk.get("symbol") or ""))
-                        line = f"{_escape_html(path_d)} · {nm} <code>({sym})</code>{tag_html}"
-                    else:
-                        line = f"{_escape_html(path_d)}{tag_html}"
-                    parts.append(f'<div class="cal-line cal-theme {theme_cls}">{line}</div>')
-                if len(ents) > int(max_lines_per_cell):
-                    parts.append(f'<div class="cal-more">+{len(ents) - int(max_lines_per_cell)} 테마</div>')
-                parts.append("</div>")
+        ents = by_date.get(key, [])
+        if ents:
+            parts.append('<div class="cal-lines">')
+            for e in ents[: max(1, int(max_lines_per_cell))]:
+                path = str(e.get("display_path") or "-")
+                path_d = path if len(path) <= 18 else path[:16] + "…"
+                theme_cls = _calendar_theme_class(path)
+                stk = _first_leader_stock(list(e.get("leader_top_stocks") or []))
+                st_raw = str(e.get("leader_status") or "").strip()
+                tag_html = ""
+                if st_raw and st_raw != "주도":
+                    tag_html = f" <span class=\"cal-tag\">{_escape_html(st_raw)}</span>"
+                if stk:
+                    nm = _escape_html(str(stk.get("name") or stk.get("symbol") or "-"))
+                    sym = _escape_html(str(stk.get("symbol") or ""))
+                    line = f"{_escape_html(path_d)} · {nm} <code>({sym})</code>{tag_html}"
+                else:
+                    line = f"{_escape_html(path_d)}{tag_html}"
+                parts.append(f'<div class="cal-line cal-theme {theme_cls}">{line}</div>')
+            if len(ents) > int(max_lines_per_cell):
+                parts.append(f'<div class="cal-more">+{len(ents) - int(max_lines_per_cell)} 테마</div>')
+            parts.append("</div>")
         parts.append("</div>")
     parts.append("</div></div>")
     return "".join(parts)
@@ -992,8 +992,7 @@ def _render_theme_history_calendar_md(
         "> 히스토리에는 **주도** 테마와 대표 종목 1개만 기록합니다.",
         "",
     ]
-    cur = month_first
-    while cur <= month_last:
+    for cur in _iter_month_calendar_cells(month_first, month_last):
         key = cur.isoformat()
         ents = by_date.get(key, [])
         if ents:
@@ -1009,7 +1008,6 @@ def _render_theme_history_calendar_md(
                     lines.append(f"  - {path} — {nm} (`{sym}`){suf}")
                 else:
                     lines.append(f"  - {path}{suf}")
-        cur += _dt.timedelta(days=1)
     lines.append("")
     return lines
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -10,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.collect_thema_sector_data import (
     _all_unique_stock_symbols_from_groups,
+    _calendar_display_by_date,
     _build_group_blueprints,
     _build_investor_by_symbol,
     _build_rows,
@@ -287,6 +289,35 @@ def test_theme_history_calendar_shows_one_stock_per_theme() -> None:
     assert "SK" in html and "000660" in html
     assert "005930" not in html
     assert "cal-theme" in html
+
+
+def test_theme_history_calendar_keeps_previous_month_days_visible() -> None:
+    previous = {
+        "display_path": "Semiconductor > Memory",
+        "leader_status": "주도",
+        "leader_top_stocks": [{"symbol": "000660", "name": "SK hynix", "rs": 90.0}],
+    }
+    leader_by_date = {"2026-09-30": [previous]}
+    month_first = date(2026, 10, 1)
+    month_last = date(2026, 10, 31)
+
+    display = _calendar_display_by_date(
+        leader_by_date,
+        [],
+        month_first,
+        month_last,
+        fallback_top=3,
+        repr_stocks=1,
+    )
+    html = _render_theme_history_calendar_html(display, "2026-10-02")
+
+    assert "2026-09-30" in display
+    assert (
+        '<div class="cal-cell other"><div class="cal-daynum">30</div>'
+        '<div class="cal-lines">'
+    ) in html
+    assert "SK hynix" in html
+    assert "000660" in html
 
 
 def test_theme_history_local_summary_counts_snapshot_files(tmp_path) -> None:
