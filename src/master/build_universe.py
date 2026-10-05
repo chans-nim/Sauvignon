@@ -28,11 +28,9 @@ def main() -> None:
     kosdaq = load_master("kosdaq_master.parquet")
     df = pd.concat([kospi, kosdaq], ignore_index=True)
     df["asset_type"] = df["symbol"].map(classify_daily_asset_type)
-    df["listing_date"] = pd.NaT
+    df["listing_date"] = pd.to_datetime(df["listing_date"], format="%Y%m%d", errors="coerce")
     df["is_etf"] = False
     df["is_spac"] = df["name"].fillna("").str.contains("스팩", na=False)
-    df["is_trading_halt"] = False
-    df["is_admin_issue"] = False
     df["is_warning"] = False
     df["is_active"] = True
     df["updated_at"] = pd.Timestamp.now()

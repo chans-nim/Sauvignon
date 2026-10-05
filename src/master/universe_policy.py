@@ -4,12 +4,13 @@ import re
 from typing import Any
 
 
-# KIS domestic daily-price APIs use the six-digit KRX short code.  The KRX
+# KIS domestic daily-price APIs use six-character KRX short codes, including
+# newer codes containing letters (for example 0007C0). The KRX
 # master files also contain longer product codes (for example, ELW-style
 # entries beginning with Q); keeping those rows in the universe is useful for
 # auditability, but sending them to the daily stock endpoint can never produce
 # the required daily row.
-KIS_DAILY_SYMBOL_PATTERN = r"[0-9]{6}"
+KIS_DAILY_SYMBOL_PATTERN = r"[0-9][0-9A-Z]{5}"
 KIS_DAILY_SYMBOL_RE = re.compile(rf"^{KIS_DAILY_SYMBOL_PATTERN}$")
 COLLECTIBLE_ASSET_TYPE = "stock"
 UNSUPPORTED_SYMBOL_ASSET_TYPE = "unsupported_symbol"
@@ -30,5 +31,6 @@ def collectible_universe_sql(alias: str | None = None) -> str:
     prefix = f"{alias}." if alias else ""
     return (
         f"{prefix}is_active = TRUE "
+        f"AND COALESCE({prefix}is_trading_halt, FALSE) = FALSE "
         f"AND regexp_matches(TRIM({prefix}symbol), '^{KIS_DAILY_SYMBOL_PATTERN}$')"
     )

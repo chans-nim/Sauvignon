@@ -11,17 +11,18 @@ from src.storage import meta_store
 from src.common.logger import get_logger
 from src.jobs.gap_fill_job import run_gap_fill
 from src.common.settings import settings
+from src.clients.kis_auth import get_client
 
 log = get_logger(__name__)
 KST = ZoneInfo("Asia/Seoul")
 
 
-def resolve_collection_target_date(now: datetime | None = None) -> date:
+def resolve_collection_target_date(now: datetime | None = None, *, calendar_loader=None) -> date:
     """Resolve the market date independently of delayed GitHub scheduling.
 
     Before the Korean market opens, collect the previous weekday instead of treating the
-    new calendar day as the target. Exchange holidays are deliberately not guessed here:
-    an unexpected empty weekday must fail closed rather than publish an incomplete snapshot.
+    new calendar day as the target. Production uses the KIS exchange calendar;
+    missing calendar data fails closed instead of guessing from empty price responses.
     """
     current = now.astimezone(KST) if now is not None and now.tzinfo else (now.replace(tzinfo=KST) if now else datetime.now(KST))
     candidate = current.date()
@@ -29,6 +30,26 @@ def resolve_collection_target_date(now: datetime | None = None) -> date:
         candidate -= timedelta(days=1)
     while candidate.weekday() >= 5:
         candidate -= timedelta(days=1)
+    if calendar_loader is not None:
+        start = candidate - timedelta(days=14)
+        rows = calendar_loader(start.isoformat())
+        calendar = {}
+        for row in rows:
+            raw_date = str(row.get("bass_dt") or "").strip()
+            if not raw_date:
+                continue
+            day = datetime.strptime(raw_date, "%Y%m%d").date()
+            flag = str(row.get("opnd_yn") or "").strip().upper()
+            if flag not in {"Y", "N"}:
+                raise RuntimeError(f"KIS calendar has invalid opening flag for {day}")
+            calendar[day] = flag == "Y"
+        while candidate >= start:
+            if candidate not in calendar:
+                raise RuntimeError(f"KIS calendar has no opening information for {candidate}")
+            if calendar[candidate]:
+                return candidate
+            candidate -= timedelta(days=1)
+        raise RuntimeError("KIS calendar has no open trading date in the last 14 days")
     return candidate
 
 
@@ -155,7 +176,7 @@ def run_incremental_and_gap_fill(
 
 def main() -> None:
     # GitHub schedule이 자정을 넘어 지연돼도 새벽의 빈 날짜를 수집 대상으로 잡지 않는다.
-    target_end = resolve_collection_target_date()
+    target_end = resolve_collection_target_date(calendar_loader=get_client().get_market_calendar)
     write_github_output("target_date", target_end.isoformat())
     if target_end < date(2000, 1, 1):
         log.info("system date looks wrong, skip collect")

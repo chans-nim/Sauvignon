@@ -142,6 +142,9 @@ def test_kis_daily_scope_keeps_normal_symbols_and_rejects_master_product_codes()
     assert is_kis_daily_collectible_symbol(" 005930 ") is True
     assert is_kis_daily_collectible_symbol("Q76012348") is False
     assert is_kis_daily_collectible_symbol("12345") is False
+    assert is_kis_daily_collectible_symbol("0007C0") is True
+    assert is_kis_daily_collectible_symbol("Q610082") is False
+    assert is_kis_daily_collectible_symbol("Q12345") is False
     assert classify_daily_asset_type("Q76012348") == UNSUPPORTED_SYMBOL_ASSET_TYPE
 
 
@@ -150,18 +153,50 @@ def test_collectible_universe_sql_uses_same_scope_as_python_policy() -> None:
 
     con = duckdb.connect()
     try:
-        con.execute("CREATE TABLE universe(symbol TEXT, is_active BOOLEAN)")
+        con.execute("CREATE TABLE universe(symbol TEXT, is_active BOOLEAN, is_trading_halt BOOLEAN DEFAULT FALSE)")
         con.executemany(
-            "INSERT INTO universe VALUES (?, ?)",
-            [("005930", True), ("Q76012348", True), ("000660", False)],
+            "INSERT INTO universe(symbol, is_active) VALUES (?, ?)",
+            [("005930", True), ("Q76012348", True), ("000660", False), ("0007C0", True)],
         )
+        con.execute("INSERT INTO universe VALUES ('008290', TRUE, TRUE)")
         actual = con.execute(
             f"SELECT symbol FROM universe u WHERE {collectible_universe_sql('u')} ORDER BY symbol"
         ).fetchall()
     finally:
         con.close()
 
-    assert actual == [("005930",)]
+    assert actual == [("0007C0",), ("005930",)]
+
+
+def test_exchange_holiday_targets_previous_open_date() -> None:
+    kst = ZoneInfo("Asia/Seoul")
+    rows = [
+        {"bass_dt": "20261002", "opnd_yn": "Y"},
+        {"bass_dt": "20261003", "opnd_yn": "N"},
+        {"bass_dt": "20261004", "opnd_yn": "N"},
+        {"bass_dt": "20261005", "opnd_yn": "N"},
+        {"bass_dt": "20261006", "opnd_yn": "Y"},
+    ]
+    loader = lambda _start: rows
+    assert resolve_collection_target_date(datetime(2026, 10, 6, 8, tzinfo=kst), calendar_loader=loader) == date(2026, 10, 2)
+    assert resolve_collection_target_date(datetime(2026, 10, 6, 16, tzinfo=kst), calendar_loader=loader) == date(2026, 10, 6)
+
+
+def test_missing_exchange_calendar_blocks_collection() -> None:
+    with pytest.raises(RuntimeError, match="no opening information"):
+        resolve_collection_target_date(datetime(2026, 10, 6, 8), calendar_loader=lambda _start: [])
+
+
+def test_market_calendar_request_uses_official_opening_endpoint(monkeypatch) -> None:
+    from src.clients.kis_client import KISClient
+    client = KISClient()
+    calls = []
+    def fake_request(path, params, tr_id):
+        calls.append((path, params, tr_id))
+        return {"output": [{"bass_dt": "20261005", "opnd_yn": "N"}]}
+    monkeypatch.setattr(client, "request_get", fake_request)
+    assert client.get_market_calendar("2026-09-21")[0]["opnd_yn"] == "N"
+    assert calls == [("/uapi/domestic-stock/v1/quotations/chk-holiday", {"BASS_DT": "20260921", "CTX_AREA_FK": "", "CTX_AREA_NK": ""}, "CTCA0903R")]
 
 
 def test_gap_fill_failure_blocks_downstream_publish() -> None:

@@ -11,13 +11,15 @@ OUT_DIR = settings.project_root / "data" / "lake" / "master"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 MST_PATH = RAW_MASTER_DIR / "kospi_code.mst"
 OUT_PATH = OUT_DIR / "kospi_master.parquet"
-TAIL_LEN = 228
+TAIL_LEN = 227  # Official field widths, excluding the line ending.
 
 def parse_row(row: str) -> Dict[str, str]:
-    row = row.rstrip("\n")
+    row = row.rstrip("\r\n")
     head = row[:-TAIL_LEN]
     tail = row[-TAIL_LEN:]
-    return {"symbol": head[:9].strip(), "std_code": head[9:21].strip(), "name": head[21:].strip(), "market": "KOSPI", "raw_tail": tail}
+    return {"symbol": head[:9].strip(), "std_code": head[9:21].strip(), "name": head[21:].strip(), "market": "KOSPI", "raw_tail": tail,
+            "is_trading_halt": tail[60:61] == "Y", "is_admin_issue": tail[62:63] == "Y",
+            "listing_date": tail[105:113].strip()}
 
 def main() -> None:
     if not MST_PATH.exists():

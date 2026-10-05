@@ -114,3 +114,13 @@ class KISClient:
             "fid_org_adj_prc": "1",
         }
         return self.request_get(self.config.daily_price_url, params, self.config.daily_price_tr_id)
+
+    def get_market_calendar(self, start_date: str) -> list[dict]:
+        """Read one calendar window; the caller verifies its required dates exist."""
+        payload = self.request_get(
+            "/uapi/domestic-stock/v1/quotations/chk-holiday",
+            {"BASS_DT": start_date.replace("-", ""), "CTX_AREA_FK": "", "CTX_AREA_NK": ""},
+            "CTCA0903R",
+        )
+        output = payload.get("output") or []
+        return [output] if isinstance(output, dict) else output
