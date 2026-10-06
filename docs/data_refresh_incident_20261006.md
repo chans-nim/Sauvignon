@@ -89,3 +89,15 @@ Official API references:
 
 Verification: 92 tests passed, one skipped. Price snapshot recovery separately
 succeeded: remote manifest advances through `data-snapshot-20261006-1218`.
+
+## Intraday reports with unavailable flow omitted
+
+`--investor-policy auto` is now the default and is explicit in the workflow.
+Before the 15:30 KST KRX close, foreign/institution APIs and their retry pass
+are omitted. Quote completeness is still enforced with `--strict-completeness`;
+program and quote collection and RS scoring continue. Missing investor values
+remain null in JSON and `-` in tables, with an explanation in HTML/Markdown.
+After close, auto collects investor data and strict coverage checks still apply.
+`--investor-policy required` retains the early failure for intraday execution;
+`--investor-policy omit` skips investor collection regardless of time.
+The schedule remains 20:30 KST; manual intraday runs can now produce reports.

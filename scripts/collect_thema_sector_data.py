@@ -1255,6 +1255,21 @@ def _require_investor_after_close(now: _dt.datetime | None = None) -> None:
         )
 
 
+def _investor_collection_enabled(policy: str, now: _dt.datetime | None = None) -> bool:
+    if policy == "omit":
+        return False
+    if policy == "required":
+        _require_investor_after_close(now)
+        return True
+    if policy != "auto":
+        raise ValueError(f"Unknown investor policy: {policy}")
+    try:
+        _require_investor_after_close(now)
+    except RuntimeError:
+        return False
+    return True
+
+
 def _fetch_quote_enrichment_concurrent(
     client: Any,
     symbols: list[str],
@@ -2257,6 +2272,8 @@ def _render_theme_summary_md(
         ),
         "",
     ]
+    if meta.get("investor_collection_note"):
+        lines.extend([f"> {meta['investor_collection_note']}", ""])
     lines.extend(
         _render_theme_history_section_md(
             hist,
@@ -2629,6 +2646,8 @@ def _render_theme_report_html(
         f"종목 {meta.get('unique_stock_count', '-')} / 라이브 신호 {meta.get('live_signal_symbol_count', '-')} / "
         f"시세보강 {meta.get('quote_symbol_count', '-')} / 수급(KIS 순위) {meta.get('foreign_institution_rank_symbol_count', '-')} / "
         f"프로그램 종목별 {meta.get('program_trade_symbol_count', '-')} / 대표종목 {top_n}</p>"
+        + (f"<p>{_escape_html(meta['investor_collection_note'])}</p>" if meta.get("investor_collection_note") else "")
+        +
         "<div class=\"hero-stats\">"
         f"<div class=\"hero-stat\"><div class=\"label\">대분류</div><div class=\"value\">{len(major_rows)}</div></div>"
         f"<div class=\"hero-stat\"><div class=\"label\">중분류</div><div class=\"value\">{len(middle_rows)}</div></div>"
@@ -2713,6 +2732,12 @@ def main() -> None:
         help="보강(시세·프로그램·필요 시 종목별 수급) 병렬 워커 수. 기본 4. 과도한 값은 KIS 제한에 걸릴 수 있음.",
     )
     parser.add_argument(
+        "--investor-policy",
+        choices=["auto", "required", "omit"],
+        default="auto",
+        help="auto: omit unavailable intraday investor data; required: require after-close data; omit: skip investor APIs.",
+    )
+    parser.add_argument(
         "--strict-completeness",
         action="store_true",
         help="Fail instead of publishing when required quote/investor enrichment is empty or incomplete.",
@@ -2744,8 +2769,11 @@ def main() -> None:
         help="Disable TLS verify for Telegram only (corporate SSL inspection).",
     )
     args = parser.parse_args()
-    if args.strict_completeness and not args.no_quote_enrichment and args.mode != "mock":
-        _require_investor_after_close()
+    investor_enabled = _investor_collection_enabled(args.investor_policy)
+    investor_note = ""
+    if not investor_enabled:
+        investor_note = "외국인·기관 수급은 수집 대상에서 제외했습니다. 미제공 값은 '-'로 표시하며 시세·프로그램 데이터로 분석합니다."
+        print(f"[investor] policy={args.investor_policy} collection=omitted; quote/program collection continues")
     if bool(args.no_quote_enrichment) and bool(args.full_quote_enrichment):
         raise SystemExit("--no-quote-enrichment 와 --full-quote-enrichment 는 함께 쓸 수 없습니다.")
     quote_enrichment = not bool(args.no_quote_enrichment)
@@ -2868,9 +2896,9 @@ def main() -> None:
     investor_by_symbol: dict[str, dict[str, Any]] = {}
     t_fi = time.perf_counter()
     try:
-        fi_rows = client.fetch_foreign_institution_flow()
+        fi_rows = client.fetch_foreign_institution_flow() if investor_enabled else []
         investor_by_symbol = _build_investor_by_symbol(fi_rows)
-        if len(fi_rows) == 0:
+        if investor_enabled and len(fi_rows) == 0:
             print(
                 "WARNING: fetch_foreign_institution_flow returned empty rows "
                 "(check KIS mode/장 운영/자격증명; 순위 무응답 시 수급 열은 비게 됩니다).",
@@ -2930,7 +2958,7 @@ def main() -> None:
     quotes_by_symbol: dict[str, dict[str, Any]] = dict(probe_quotes)
     program_by_symbol: dict[str, dict[str, Any]] = {}
     if quote_enrichment:
-        missing_investor_symbols = set(_missing_investor_symbols(quote_symbols, investor_by_symbol))
+        missing_investor_symbols = set(_missing_investor_symbols(quote_symbols, investor_by_symbol)) if investor_enabled else set()
         t_en = time.perf_counter()
         try:
             q2, investor_extra, program_by_symbol = _fetch_quote_enrichment_concurrent(
@@ -2955,7 +2983,7 @@ def main() -> None:
         except Exception as exc:
             print(f"WARNING: quote enrichment: {exc}", file=sys.stderr)
         print(f"[timing] quote_enrichment (incl. per-symbol API)  {time.perf_counter() - t_en:.2f}s")
-        if args.strict_completeness:
+        if args.strict_completeness and investor_enabled:
             missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol)
             if missing_investor_after:
                 print(
@@ -3195,6 +3223,9 @@ def main() -> None:
         "live_signal_symbol_count": len(live_signal_map),
         "quote_symbol_count": len(quotes_by_symbol),
         "foreign_institution_rank_symbol_count": len(investor_by_symbol),
+        "investor_policy": args.investor_policy,
+        "investor_collection_enabled": investor_enabled,
+        "investor_collection_note": investor_note,
         "foreign_institution_missing_symbol_count": len(
             _missing_investor_symbols(quote_symbols, investor_by_symbol)
         ),

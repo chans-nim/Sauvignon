@@ -53,6 +53,7 @@ jobs:
           python -m scripts.collect_thema_sector_data \
             --theme-history-sync-max-releases 5 \
             --enrichment-workers 6 \
+            --investor-policy auto \
             --strict-completeness \
             --telegram
 
