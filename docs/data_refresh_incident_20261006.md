@@ -55,3 +55,15 @@ Empty-day `SUM` results are coalesced to zero so audit output no longer attempts
 to convert NaN to an integer. After successful incremental collection, the
 repair stage reloads silver paths and date counts to include newly filled dates.
 Regression verification: 86 tests passed, one skipped.
+
+## Follow-up: delisted listing 084180
+
+The next run collected 3,761 symbols and failed only on Suseong Webtoon
+(`084180`). Official DART disclosure `20260916900675`, document `11582487`,
+states final liquidation trading through September 30 and delisting October 1.
+The vendor master was still treated as active. A sourced lifecycle registry now
+sets this listing inactive from its delisting date, matching market, short code,
+and ISIN. Collection, gap detection, repair and snapshot validation share the
+active-universe predicate, so no arbitrary missing-price error is ignored.
+Historical silver is preserved. Empty initial audit counts precede incremental
+collection and do not mean that the 3,761 successful writes were absent.

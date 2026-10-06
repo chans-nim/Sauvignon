@@ -8,6 +8,7 @@ from src.master.universe_policy import (
     classify_daily_asset_type,
 )
 from src.storage import meta_store
+from src.master.lifecycle_policy import apply_lifecycle_overrides
 
 log = get_logger(__name__)
 MASTER_DIR = settings.project_root / "data" / "lake" / "master"
@@ -33,6 +34,7 @@ def main() -> None:
     df["is_spac"] = df["name"].fillna("").str.contains("스팩", na=False)
     df["is_warning"] = False
     df["is_active"] = True
+    df = apply_lifecycle_overrides(df)
     df["updated_at"] = pd.Timestamp.now()
     if not args.include_spac:
         df = df[~df["is_spac"]].copy()
