@@ -30,6 +30,7 @@ from src.common.logger import get_logger
 from src.storage import meta_store
 from src.transform.build_snapshot import silver_parquet_paths
 from scripts.run_daily_collect import resolve_collection_target_date, write_github_output
+from src.clients.kis_auth import get_client
 
 import importlib.util
 
@@ -59,6 +60,16 @@ def _daterange_inclusive(start: date, end: date):
     while d <= end:
         yield d
         d += timedelta(days=1)
+
+
+def resolve_audit_end_date(end_date: str | None, *, read_only: bool = False) -> date:
+    if end_date:
+        return date.fromisoformat(end_date)
+    # Read-only audit/dry-run must not make KIS calls. Repair must use the
+    # exchange calendar, just like daily collection, before requiring an end row.
+    if read_only:
+        return resolve_collection_target_date()
+    return resolve_collection_target_date(calendar_loader=get_client().get_market_calendar)
 
 
 def main() -> None:
@@ -115,7 +126,7 @@ def main() -> None:
     if args.days < 1:
         parser.error("--days must be >= 1")
 
-    end = date.fromisoformat(args.end_date) if args.end_date else resolve_collection_target_date()
+    end = resolve_audit_end_date(args.end_date, read_only=args.audit_only or args.dry_run)
     start = end - timedelta(days=args.days - 1)
     write_github_output("target_date", end.isoformat())
     write_github_output("collection_start_date", start.isoformat())
@@ -210,6 +221,11 @@ def main() -> None:
             )
             sys.exit(r)
         inc_ok = True
+
+        # Collection may create new files/dates. Repair must inspect the updated
+        # silver rather than skip dates that were empty in the initial audit.
+        paths = silver_parquet_paths()
+        audit_rows = [audit_silver_date(paths, d.isoformat()) for d in _daterange_inclusive(start, end)]
 
     total_ok = total_fail = total_proc = 0
     low_total_ok = low_total_fail = low_total_proc = 0

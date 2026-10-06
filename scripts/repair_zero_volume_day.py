@@ -146,8 +146,8 @@ def audit_silver_date(paths: list, target: str) -> dict:
             """
             SELECT
               COUNT(*) AS rows_on_date,
-              SUM(CASE WHEN COALESCE(volume, 0) = 0 THEN 1 ELSE 0 END) AS vol0,
-              SUM(CASE WHEN COALESCE(volume, 0) = 0 AND COALESCE(close, 0) > 0 THEN 1 ELSE 0 END) AS vol0_close_pos,
+              COALESCE(SUM(CASE WHEN COALESCE(volume, 0) = 0 THEN 1 ELSE 0 END), 0) AS vol0,
+              COALESCE(SUM(CASE WHEN COALESCE(volume, 0) = 0 AND COALESCE(close, 0) > 0 THEN 1 ELSE 0 END), 0) AS vol0_close_pos,
               COUNT(DISTINCT symbol) AS symbols
             FROM read_parquet(?)
             WHERE CAST(date AS DATE) = CAST(? AS DATE)

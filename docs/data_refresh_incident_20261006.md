@@ -43,3 +43,15 @@ After deploying these changes to the workflow's branch, rerun
 collects missing dates, and validates the snapshot before publication. Then
 regenerate the Malbec report and verify its source release and analysis date.
 The local changes alone do not update the published snapshot or downloaded HTML.
+
+## Follow-up: audit/repair workflow
+
+The reported 09:24 KST failure came from `audit_repair_last_week`, which still
+called the weekday-only resolver without a calendar loader. That repair entry
+point now uses the KIS opening calendar too. Read-only audit and dry-run retain
+their no-KIS-call behavior; explicit end dates remain explicit overrides.
+
+Empty-day `SUM` results are coalesced to zero so audit output no longer attempts
+to convert NaN to an integer. After successful incremental collection, the
+repair stage reloads silver paths and date counts to include newly filled dates.
+Regression verification: 86 tests passed, one skipped.
