@@ -67,3 +67,25 @@ and ISIN. Collection, gap detection, repair and snapshot validation share the
 active-universe predicate, so no arbitrary missing-price error is ignored.
 Historical silver is preserved. Empty initial audit counts precede incremental
 collection and do not mean that the 3,761 successful writes were absent.
+
+## Follow-up: theme investor coverage
+
+Run `37411243835` started October 6 at 12:55 KST and failed with investor
+coverage 0/233. The official `inquire-investor` documentation says same-day
+data is provided after market close. Retrying hundreds of symbols intraday
+does not make that data available. Strict KRX investor collection now checks
+the 15:30 KST close before starting expensive calls; the existing scheduled
+workflow remains at 20:30 KST. After-close availability is still verified by
+actual coverage and never assumed to be complete from the clock alone.
+
+The official institution field `orgn_ntby_tr_pbmn` is now recognized, and strict
+coverage requires both foreign and institution values (zero remains valid).
+Run the workflow after close for complete same-day flow. An intraday report can
+be generated without `--strict-completeness`; unavailable flow displays `-`.
+
+Official API references:
+- https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_investor/inquire_investor.py
+- https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_investor/chk_inquire_investor.py
+
+Verification: 92 tests passed, one skipped. Price snapshot recovery separately
+succeeded: remote manifest advances through `data-snapshot-20261006-1218`.

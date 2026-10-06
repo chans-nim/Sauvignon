@@ -685,6 +685,7 @@ class KISClient:
                 ) or _pick_by_key_fragments(iu, ("FRGN", "NTBY", "PBMN"))
                 insv = _pick(
                     iu,
+                    "ORGN_NTBY_TR_PBMN",
                     "ORGNT_NTBY_TR_PBMN",
                     "INST_NTBY_TR_PBMN",
                     "ORG_NET_TR_PBMN",
@@ -724,6 +725,7 @@ class KISClient:
             raw_ins_pbmn = _pick(
                 u,
                 "ORGNT_NTBY_TR_PBMN",
+                "ORGN_NTBY_TR_PBMN",
                 "ORG_NTBY_TR_PBMN",
                 "ORGNT_SBTR_NTBY_TR_PBMN",
                 "INST_NTBY_TR_PBMN",

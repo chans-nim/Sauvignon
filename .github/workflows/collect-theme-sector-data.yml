@@ -1,4 +1,4 @@
-# Theme(테마) 대/중분류 섹터 리포트: 평일 KST 16:00 (UTC 07:00) + 수동 실행
+# Theme(테마) 대/중분류 섹터 리포트: 평일 KST 20:30 (UTC 11:30) + 수동 실행
 # - collect_thema_sector_data 가 기본으로 GitHub theme-sector-* 릴리즈에서 theme_history 를 동기화한 뒤 수집한다.
 # - 수집 후 theme-sector- 태그로 릴리즈한다.
 name: Collect theme sector data

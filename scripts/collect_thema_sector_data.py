@@ -34,6 +34,7 @@ import sys
 import tempfile
 import threading
 import time
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -1235,9 +1236,23 @@ def _missing_investor_symbols(
     for raw_symbol in required_symbols:
         symbol = _norm_kis_stock_symbol(raw_symbol)
         item = investor_by_symbol.get(symbol) or {}
-        if item.get("foreign_net_tr_pbmn") is None and item.get("institution_net_tr_pbmn") is None:
+        if item.get("foreign_net_tr_pbmn") is None or item.get("institution_net_tr_pbmn") is None:
             missing.append(symbol)
     return sorted(set(missing))
+
+
+def _require_investor_after_close(now: _dt.datetime | None = None) -> None:
+    """Fail before expensive enrichment when strict same-day KRX flow is unavailable."""
+    kst = ZoneInfo("Asia/Seoul")
+    current = now or _dt.datetime.now(kst)
+    current = current.astimezone(kst) if current.tzinfo else current.replace(tzinfo=kst)
+    if current.weekday() < 5 and current.time() < _dt.time(15, 30):
+        raise RuntimeError(
+            "Strict same-day investor collection is unavailable before KRX close (15:30 KST). "
+            "KIS inquire-investor publishes same-day data after market close; "
+            "run the workflow at 20:30 KST, or omit --strict-completeness for an intraday "
+            "report with unavailable investor values shown as '-'."
+        )
 
 
 def _fetch_quote_enrichment_concurrent(
@@ -2729,6 +2744,8 @@ def main() -> None:
         help="Disable TLS verify for Telegram only (corporate SSL inspection).",
     )
     args = parser.parse_args()
+    if args.strict_completeness and not args.no_quote_enrichment and args.mode != "mock":
+        _require_investor_after_close()
     if bool(args.no_quote_enrichment) and bool(args.full_quote_enrichment):
         raise SystemExit("--no-quote-enrichment 와 --full-quote-enrichment 는 함께 쓸 수 없습니다.")
     quote_enrichment = not bool(args.no_quote_enrichment)
