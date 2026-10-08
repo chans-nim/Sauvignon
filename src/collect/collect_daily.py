@@ -45,7 +45,12 @@ def _collect_row(row: dict, start_date: str, end_date: str) -> tuple[bool, str |
         target_date = pd.Timestamp(end_date).normalize()
         has_target = not df.empty and (pd.to_datetime(df["date"]).dt.normalize() == target_date).any()
         if not has_target:
-            raise RuntimeError(f"KIS response has no valid row for required target date {end_date}")
+            target_rows = combined.loc[pd.to_datetime(combined["date"]).dt.normalize() == target_date]
+            sample = target_rows[["date", "open", "high", "low", "close", "volume", "value"]].head(3).to_dict("records")
+            raise RuntimeError(
+                f"KIS response has no valid row for required target date {end_date}; "
+                f"received_rows={len(combined)} target_rows={len(target_rows)} target_sample={sample}"
+            )
         saved = parquet_store.upsert_ohlcv_from_df(df)
         last_date = df["date"].max().strftime("%Y-%m-%d")
         meta_store.upsert_collect_state(symbol, True, last_date, None)

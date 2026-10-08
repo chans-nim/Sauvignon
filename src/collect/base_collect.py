@@ -8,6 +8,11 @@ if TYPE_CHECKING:
     from src.clients.kis_client import KISClient
 
 
+def _price_field(row: dict, primary: str, fallback: str):
+    value = row.get(primary)
+    return row.get(fallback) if value is None or value == "" else value
+
+
 def normalize_ohlcv(symbol: str, market: str, payload: dict) -> pd.DataFrame:
     rows = payload.get("output2") or payload.get("output") or []
     if not rows:
@@ -22,15 +27,24 @@ def normalize_ohlcv(symbol: str, market: str, payload: dict) -> pd.DataFrame:
             "symbol": symbol,
             "market": market,
             "date": pd.to_datetime(date_str, format="%Y%m%d", errors="coerce"),
-            "open": pd.to_numeric(r.get("stck_oprc") or r.get("open"), errors="coerce"),
-            "high": pd.to_numeric(r.get("stck_hgpr") or r.get("high"), errors="coerce"),
-            "low": pd.to_numeric(r.get("stck_lwpr") or r.get("low"), errors="coerce"),
-            "close": pd.to_numeric(r.get("stck_clpr") or r.get("close"), errors="coerce"),
-            "volume": pd.to_numeric(r.get("acml_vol") or r.get("volume"), errors="coerce"),
-            "value": pd.to_numeric(r.get("acml_tr_pbmn") or r.get("value"), errors="coerce"),
+            "open": pd.to_numeric(_price_field(r, "stck_oprc", "open"), errors="coerce"),
+            "high": pd.to_numeric(_price_field(r, "stck_hgpr", "high"), errors="coerce"),
+            "low": pd.to_numeric(_price_field(r, "stck_lwpr", "low"), errors="coerce"),
+            "close": pd.to_numeric(_price_field(r, "stck_clpr", "close"), errors="coerce"),
+            "volume": pd.to_numeric(_price_field(r, "acml_vol", "volume"), errors="coerce"),
+            "value": pd.to_numeric(_price_field(r, "acml_tr_pbmn", "value"), errors="coerce"),
             "ingested_at": now,
         })
-    return pd.DataFrame(norm).dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+    columns = ["symbol", "market", "date", "open", "high", "low", "close", "volume", "value", "ingested_at"]
+    df = pd.DataFrame(norm, columns=columns).dropna(subset=["date"])
+    # An explicit dated no-trade row can carry a close but zero OHLC.
+    # Use that same row's close only when all three prices and activity are zero;
+    # missing fields and inconsistent traded rows must still fail validation.
+    no_trade = (df["close"] > 0) & (df["volume"] == 0) & (df["value"] == 0)
+    no_trade &= (df[["open", "high", "low"]] == 0).all(axis=1)
+    for column in ("open", "high", "low"):
+        df.loc[no_trade, column] = df.loc[no_trade, "close"]
+    return df.sort_values("date").reset_index(drop=True)
 
 def validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
