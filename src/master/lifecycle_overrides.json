@@ -7,5 +7,14 @@
     "delisting_date": "2026-10-01",
     "source_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260916900675",
     "reason": "Official delisting; final exchange trading date 2026-09-30"
+  },
+  {
+    "symbol": "196490",
+    "std_code": "KR7196490007",
+    "market": "KOSDAQ",
+    "name": "디에이테크놀로지",
+    "delisting_date": "2026-10-07",
+    "source_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260921900630",
+    "reason": "Official delisting; final liquidation trading date 2026-10-06"
   }
 ]

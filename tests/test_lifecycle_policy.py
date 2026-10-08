@@ -31,3 +31,12 @@ def test_short_code_reuse_does_not_exclude_different_listing():
     universe = _universe()
     universe.loc[0, "std_code"] = "KR7084180017"
     assert apply_lifecycle_overrides(universe, as_of=date(2026, 10, 6))["is_active"].all()
+
+
+def test_da_technology_final_trading_day_and_delisting_date():
+    universe = pd.DataFrame([{
+        "symbol": "196490", "std_code": "KR7196490007", "market": "KOSDAQ",
+        "is_active": True, "is_trading_halt": False,
+    }])
+    assert apply_lifecycle_overrides(universe, as_of=date(2026, 10, 6)).iloc[0]["is_active"]
+    assert not apply_lifecycle_overrides(universe, as_of=date(2026, 10, 7)).iloc[0]["is_active"]
