@@ -37,3 +37,28 @@ def test_numeric_zero_volume_is_preserved_for_normal_prices():
     df = normalize_ohlcv("196490", "KOSPI", payload(
         stck_oprc=10000, stck_hgpr=10000, stck_lwpr=10000, acml_vol=0, acml_tr_pbmn=0))
     assert len(validate_ohlcv(df)) == 1
+
+
+@pytest.mark.parametrize("reference", [93805, 93815])
+def test_flat_no_trade_reference_prices_use_reported_close(reference):
+    df = normalize_ohlcv("498180", "KOSPI", payload(
+        stck_bsop_date="20261008", stck_oprc=reference, stck_hgpr=reference,
+        stck_lwpr=reference, stck_clpr=93810))
+    valid = validate_ohlcv(df)
+    assert len(valid) == 1
+    assert valid.iloc[0]["date"] == pd.Timestamp("2026-10-08")
+    assert valid.iloc[0][["open", "high", "low", "close"]].tolist() == [93810] * 4
+    assert valid.iloc[0][["volume", "value"]].tolist() == [0, 0]
+
+
+@pytest.mark.parametrize("changes", [
+    {"acml_vol": 1}, {"acml_tr_pbmn": 1},
+    {"acml_vol": None}, {"acml_tr_pbmn": None},
+    {"stck_oprc": None}, {"stck_lwpr": 93800},
+    {"stck_oprc": -1, "stck_hgpr": -1, "stck_lwpr": -1},
+])
+def test_inconsistent_flat_reference_row_is_not_repaired(changes):
+    fields = dict(stck_oprc=93805, stck_hgpr=93805, stck_lwpr=93805,
+                  stck_clpr=93810)
+    fields.update(changes)
+    assert validate_ohlcv(normalize_ohlcv("498180", "KOSPI", payload(**fields))).empty

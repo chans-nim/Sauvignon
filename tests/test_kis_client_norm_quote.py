@@ -1,6 +1,26 @@
 """Tests for KIS quote/sector return_pct normalization (PRDY_CTRT is percent, not decimal)."""
 
 from sector_scanner.kis_client import _norm_sector_current_row, _norm_stock_quote
+import pytest
+
+
+@pytest.mark.parametrize("activity, expected", [
+    ({"acml_vol": "0", "acml_tr_pbmn": "0"}, True),
+    ({"acml_vol": 0, "acml_tr_pbmn": 0}, True),
+    ({}, False),
+    ({"acml_vol": "0"}, False),
+    ({"acml_vol": "", "acml_tr_pbmn": "0"}, False),
+    ({"acml_vol": "bad", "acml_tr_pbmn": "0"}, False),
+    ({"acml_vol": "1", "acml_tr_pbmn": "0"}, False),
+    ({"acml_vol": "0", "acml_tr_pbmn": "100"}, False),
+])
+def test_no_trade_requires_explicit_zero_activity(activity, expected):
+    quote = _norm_stock_quote({"stck_prpr": "1000", **activity})
+    assert quote["no_trade"] is expected
+
+
+def test_no_trade_requires_positive_price():
+    assert not _norm_stock_quote({"acml_vol": "0", "acml_tr_pbmn": "0"})["no_trade"]
 
 
 def test_norm_stock_quote_small_positive_pct_is_decimal_not_hundredth():

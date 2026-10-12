@@ -38,6 +38,19 @@ def test_coverage_requires_both_foreign_and_institution_values():
         "foreign_net_tr_pbmn": 0, "institution_net_tr_pbmn": None}}) == ["005930"]
 
 
+def test_confirmed_no_trade_is_exempt_without_fabricating_flow():
+    investors = {}
+    quotes = {"043220": {"no_trade": True}, "054180": {"no_trade": True}}
+    assert _missing_investor_symbols(["043220", "054180"], investors, quotes) == []
+    assert investors == {}
+    assert _missing_investor_symbols(["043220", "054180"], investors) == ["043220", "054180"]
+
+
+@pytest.mark.parametrize("quote", [{}, {"volume": 0, "value_traded": 0}, {"no_trade": False}])
+def test_missing_or_traded_quotes_still_require_investor_values(quote):
+    assert _missing_investor_symbols(["043220"], {}, {"043220": quote}) == ["043220"]
+
+
 def test_auto_omits_intraday_investor_but_requires_after_close():
     intraday = datetime(2026, 10, 6, 12, 55, tzinfo=ZoneInfo("Asia/Seoul"))
     close = datetime(2026, 10, 6, 20, 30, tzinfo=ZoneInfo("Asia/Seoul"))

@@ -37,11 +37,12 @@ def normalize_ohlcv(symbol: str, market: str, payload: dict) -> pd.DataFrame:
         })
     columns = ["symbol", "market", "date", "open", "high", "low", "close", "volume", "value", "ingested_at"]
     df = pd.DataFrame(norm, columns=columns).dropna(subset=["date"])
-    # An explicit dated no-trade row can carry a close but zero OHLC.
-    # Use that same row's close only when all three prices and activity are zero;
+    # An explicit dated no-trade row can carry zero or flat reference OHLC
+    # alongside a different close. Use that same row's close only when all
+    # three reference prices agree and activity is explicitly zero;
     # missing fields and inconsistent traded rows must still fail validation.
     no_trade = (df["close"] > 0) & (df["volume"] == 0) & (df["value"] == 0)
-    no_trade &= (df[["open", "high", "low"]] == 0).all(axis=1)
+    no_trade &= (df["open"] >= 0) & (df["open"] == df["high"]) & (df["open"] == df["low"])
     for column in ("open", "high", "low"):
         df.loc[no_trade, column] = df.loc[no_trade, "close"]
     return df.sort_values("date").reset_index(drop=True)

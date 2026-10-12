@@ -110,6 +110,12 @@ def _norm_stock_quote(out0: dict[str, Any]) -> dict[str, Any]:
         "return_pct": return_pct,
         "volume": _to_float(_pick(u, "ACML_VOL", "CNTG_VOL")),
         "value_traded": _to_float(_pick(u, "ACML_TR_PBMN", "PBMN")),
+        # Missing activity fields must never imply a confirmed no-trade quote.
+        "no_trade": (
+            _to_float(price) > 0
+            and _to_float(_pick(u, "ACML_VOL", "CNTG_VOL"), default=float("nan")) == 0
+            and _to_float(_pick(u, "ACML_TR_PBMN", "PBMN"), default=float("nan")) == 0
+        ),
     }
 
 

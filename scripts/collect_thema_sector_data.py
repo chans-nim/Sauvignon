@@ -1231,10 +1231,15 @@ def _build_investor_by_symbol(flow_rows: list[dict[str, Any]]) -> dict[str, dict
 def _missing_investor_symbols(
     required_symbols: list[str] | set[str],
     investor_by_symbol: dict[str, dict[str, Any]],
+    quotes_by_symbol: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     missing: list[str] = []
     for raw_symbol in required_symbols:
         symbol = _norm_kis_stock_symbol(raw_symbol)
+        # No trades means investor flow may be unavailable. Keep it missing in
+        # reports, rather than inventing zero flow or failing the whole report.
+        if (quotes_by_symbol or {}).get(symbol, {}).get("no_trade") is True:
+            continue
         item = investor_by_symbol.get(symbol) or {}
         if item.get("foreign_net_tr_pbmn") is None or item.get("institution_net_tr_pbmn") is None:
             missing.append(symbol)
@@ -2984,7 +2989,7 @@ def main() -> None:
             print(f"WARNING: quote enrichment: {exc}", file=sys.stderr)
         print(f"[timing] quote_enrichment (incl. per-symbol API)  {time.perf_counter() - t_en:.2f}s")
         if args.strict_completeness and investor_enabled:
-            missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol)
+            missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol, quotes_by_symbol)
             if missing_investor_after:
                 print(
                     "[enrichment] retrying investor-only missing symbols: "
@@ -3001,17 +3006,25 @@ def main() -> None:
                     log_label="[investor-retry]",
                 )
                 investor_by_symbol.update(investor_retry)
-                missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol)
+                missing_investor_after = _missing_investor_symbols(quote_symbols, investor_by_symbol, quotes_by_symbol)
+            no_trade_missing = sorted(
+                set(_missing_investor_symbols(quote_symbols, investor_by_symbol))
+                - set(missing_investor_after)
+            )
             print(
                 "[coverage] investor "
-                f"complete={len(quote_symbols) - len(missing_investor_after)}/{len(quote_symbols)} "
+                f"complete={len(quote_symbols) - len(missing_investor_after) - len(no_trade_missing)}/{len(quote_symbols)} "
+                f"no_trade_unavailable={len(no_trade_missing)} "
                 f"missing={len(missing_investor_after)}"
             )
+            if no_trade_missing:
+                print(f"[coverage] no-trade investor values left unavailable: {no_trade_missing}")
             if missing_investor_after:
                 message = (
                     "investor enrichment incomplete: "
                     f"missing={len(missing_investor_after)} missing_sample={missing_investor_after[:20]}"
-                    "; KIS inquire-investor same-day data is available only after market close"
+                    "; investor values remain unavailable after per-symbol retry; "
+                    "check API responses, permissions, and publication timing"
                 )
                 if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
                     print(f"::error title=Investor enrichment incomplete::{message}", file=sys.stderr)
@@ -3228,6 +3241,13 @@ def main() -> None:
         "investor_collection_note": investor_note,
         "foreign_institution_missing_symbol_count": len(
             _missing_investor_symbols(quote_symbols, investor_by_symbol)
+        ),
+        "foreign_institution_required_missing_symbol_count": len(
+            _missing_investor_symbols(quote_symbols, investor_by_symbol, quotes_by_symbol)
+        ),
+        "foreign_institution_no_trade_unavailable_symbols": sorted(
+            set(_missing_investor_symbols(quote_symbols, investor_by_symbol))
+            - set(_missing_investor_symbols(quote_symbols, investor_by_symbol, quotes_by_symbol))
         ),
         "program_trade_symbol_count": len(program_by_symbol),
         "quote_enrichment_mode": quote_enrichment_mode,
