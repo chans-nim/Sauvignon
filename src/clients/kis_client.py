@@ -124,3 +124,11 @@ class KISClient:
         )
         output = payload.get("output") or []
         return [output] if isinstance(output, dict) else output
+
+    def get_stock_info(self, symbol: str) -> dict:
+        """Read listing identity, dated delisting events and current trading status."""
+        return self.request_get(
+            "/uapi/domestic-stock/v1/quotations/search-stock-info",
+            {"PRDT_TYPE_CD": "300", "PDNO": symbol},
+            "CTPF1002R",
+        )

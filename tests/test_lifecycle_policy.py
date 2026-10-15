@@ -62,3 +62,25 @@ def test_busan_cast_iron_code_reuse_is_not_excluded():
         "is_active": True, "is_trading_halt": False,
     }])
     assert apply_lifecycle_overrides(universe, as_of=date(2026, 10, 12)).iloc[0]["is_active"]
+
+
+def test_hanchang_excluded_on_delisting_date():
+    universe = pd.DataFrame([{
+        "symbol": "005110", "std_code": "KR7005110002", "market": "KOSPI",
+        "is_active": True, "is_trading_halt": False,
+    }])
+    assert apply_lifecycle_overrides(universe, as_of=date(2026, 10, 14)).iloc[0]["is_active"]
+    result = apply_lifecycle_overrides(universe, as_of=date(2026, 10, 15))
+    assert not result.iloc[0]["is_active"]
+    assert len(result) == 1
+    with duckdb.connect() as con:
+        con.register("universe", result)
+        assert con.execute(f"SELECT symbol FROM universe WHERE {collectible_universe_sql()}").fetchall() == []
+
+
+def test_hanchang_override_matches_listing_identity():
+    universe = pd.DataFrame([
+        {"symbol": "005110", "std_code": "DIFFERENT_ISIN", "market": "KOSPI", "is_active": True},
+        {"symbol": "005110", "std_code": "KR7005110002", "market": "KOSDAQ", "is_active": True},
+    ])
+    assert apply_lifecycle_overrides(universe, as_of=date(2026, 10, 15))["is_active"].all()

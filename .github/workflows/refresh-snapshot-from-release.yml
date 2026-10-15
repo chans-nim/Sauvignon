@@ -12,7 +12,7 @@
 # - Create release / Upload assets: GH 권한·용량 한도 시 실패.
 # - Update data_manifest.json 후 push: 충돌 시 실패 (동시 수정 없으면 정상).
 #
-# 스케줄(둘 다 월~금):
+# 스케줄(둘 다 월~금): 다소 느리게 동작해서 2시간/3시간 전 실시
 # - UTC 07:30 = KST 16:30 : 장중/마감 전에도 수집 가능. 당일 봉은 이후 재수집 시 갱신됨.
 # - UTC 11:15 = KST 20:15 : 대체 장마감(20:00 KST) 이후 당일 최종 반영을 목표로 한 재수집.
 name: Refresh Snapshot from GitHub Release
@@ -31,8 +31,8 @@ on:
         description: "Optional: new snapshot tag to publish (default: auto data-snapshot-YYYYMMDD-HHMM)"
         required: false
   schedule:
-    - cron: "30 7 * * 1-5" # KST 16:30
-    - cron: "15 11 * * 1-5" # KST 20:15 (20:00 대체 종료 이후)
+    - cron: "30 4 * * 1-5" # KST 13:30
+    - cron: "15 9 * * 1-5" # KST 18:15 (20:00 대체 종료 이후)
 
 permissions:
   contents: write
@@ -94,6 +94,14 @@ jobs:
           KIS_ACC_NUM_SUB: ${{ secrets.KIS_ACC_NUM_SUB }}
         run: |
           python -m scripts.run_daily_collect
+
+      - name: Preserve collection diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collection-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/reports/collection/*.json
+          if-no-files-found: ignore
 
       - name: Repair zero-volume on latest date (silver, re-fetch)
         env:

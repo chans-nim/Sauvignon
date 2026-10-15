@@ -25,5 +25,14 @@
     "delisting_date": "2026-10-12",
     "source_url": "https://spn.stockplus.com/news/api/v1/disclosure_views/koscom/507351",
     "reason": "Exchange delisting notice; final liquidation trading date 2026-10-08"
+  },
+  {
+    "symbol": "005110",
+    "std_code": "KR7005110002",
+    "market": "KOSPI",
+    "name": "한창",
+    "delisting_date": "2026-10-15",
+    "source_url": "https://spn.stockplus.com/news/api/v1/disclosure_views/koscom/508367",
+    "reason": "Exchange delisting notice; final liquidation trading date 2026-10-14"
   }
 ]

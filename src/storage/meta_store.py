@@ -98,15 +98,20 @@ def replace_universe(df: pd.DataFrame) -> None:
     con.execute("INSERT INTO universe SELECT * FROM universe_df")
     con.close()
 
-def load_universe(limit: int | None = None) -> pd.DataFrame:
+def load_universe(limit: int | None = None, *, target_date: str | None = None) -> pd.DataFrame:
     con = connect()
     sql = (
-        "SELECT symbol,name,market FROM universe "
-        f"WHERE {collectible_universe_sql()} ORDER BY market,symbol"
+        "SELECT symbol,name,market,std_code,listing_date FROM universe "
+        f"WHERE {collectible_universe_sql()}"
     )
+    params = []
+    if target_date:
+        sql += " AND (listing_date IS NULL OR listing_date <= CAST(? AS DATE))"
+        params.append(target_date)
+    sql += " ORDER BY market,symbol"
     if limit:
         sql += f" LIMIT {int(limit)}"
-    df = con.execute(sql).fetchdf()
+    df = con.execute(sql, params).fetchdf()
     con.close()
     return df
 
