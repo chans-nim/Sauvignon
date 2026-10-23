@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.collect_thema_sector_data import (
     _all_unique_stock_symbols_from_groups,
+    _analyze_group_rows,
     _calendar_display_by_date,
     _build_group_blueprints,
     _build_investor_by_symbol,
@@ -27,6 +28,7 @@ from scripts.collect_thema_sector_data import (
     classify_theme_quality,
     calculate_breadth_score,
     calculate_persistence_score,
+    calculate_value_expansion_ratio,
     _score_group_members,
     _select_quote_symbols,
     _render_theme_report_html,
@@ -34,6 +36,37 @@ from scripts.collect_thema_sector_data import (
     _validate_classification_data,
 )
 from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
+
+
+def test_small_middle_groups_cannot_be_promoted_to_leader() -> None:
+    def row(name: str, members: int, strength: float) -> dict:
+        return {
+            "group_type": "middle",
+            "display_path": name,
+            "analysis": {
+                "member_count": members,
+                "market_cap_log": strength,
+                "weighted_rs": strength,
+                "avg_rs": strength,
+                "high_rs_ratio": strength,
+                "strong_rs_ratio": strength,
+                "top_members_avg_return_pct": strength,
+                "top_members_value_sum": strength,
+                "live_signal_coverage_ratio": strength,
+                "top_members_positive_ratio": 100.0,
+                "top_member_value_share_pct": 10.0,
+            },
+        }
+
+    rows = _analyze_group_rows(
+        [row("singleton", 1, 100.0), row("small", 5, 99.0), row("normal", 8, 10.0)]
+    )
+    by_name = {item["display_path"]: item["analysis"] for item in rows}
+
+    assert by_name["singleton"]["leader_status"] == "표본부족"
+    assert by_name["singleton"]["leader_eligible"] is False
+    assert by_name["small"]["leader_status"] != "주도"
+    assert by_name["small"]["leader_eligible"] is True
 
 
 def test_investor_coverage_does_not_treat_blank_ranking_rows_as_complete() -> None:
@@ -166,7 +199,7 @@ def test_build_thema_rows_and_render_html() -> None:
     assert "ThemeScoreV2" in html
     assert "지속성" in html
     assert "확산도" in html
-    assert "테마 품질" in html
+    assert "지속·확산 평가" in html
     assert "Top3 평균" in html
     assert "<details" in html
     assert 'class="pos"' in html
@@ -414,6 +447,30 @@ def test_load_theme_history_rows_default_keeps_metric_rows_for_v2(tmp_path) -> N
     assert leader_rows[0]["display_path"] == "기계"
 
 
+def test_load_leader_history_ignores_legacy_promoted_fallback(tmp_path) -> None:
+    payload = {
+        "date": "2026-05-12",
+        "rows": [
+            {
+                "date": "2026-05-12",
+                "group_type": "major",
+                "major_category": "기계",
+                "middle_category": None,
+                "leader_status": "주도",
+                "source_leader_status": "관심",
+                "theme_rs": 60.0,
+                "theme_rank": 1,
+            }
+        ],
+    }
+    (tmp_path / "theme_snapshot_20260512.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    assert _load_theme_history_rows(tmp_path, leaders_only=True) == []
+
+
 def test_combine_theme_history_dirs_lets_release_override_local(tmp_path) -> None:
     local_dir = tmp_path / "local"
     release_dir = tmp_path / "release"
@@ -581,7 +638,7 @@ def test_build_theme_metric_history_rows_keeps_all_groups_for_v2() -> None:
     assert [r["leader_status"] for r in metric_rows] == ["관심", "중립"]
 
 
-def test_build_theme_history_snapshot_rows_falls_back_when_no_strict_leader() -> None:
+def test_build_theme_history_snapshot_rows_does_not_promote_fallback_to_leader() -> None:
     rows = [
         {
             "group_type": "major",
@@ -606,11 +663,7 @@ def test_build_theme_history_snapshot_rows_falls_back_when_no_strict_leader() ->
 
     snapshot_rows = _build_theme_history_snapshot_rows(rows, [], "2026-05-12", fallback_count=1)
 
-    assert len(snapshot_rows) == 1
-    assert snapshot_rows[0]["display_path"] == "기계"
-    assert snapshot_rows[0]["leader_status"] == "주도"
-    assert snapshot_rows[0]["source_leader_status"] == "관심"
-    assert snapshot_rows[0]["leader_top_stocks"] == [{"symbol": "090710", "name": "휴림로봇", "rs": 82.8}]
+    assert snapshot_rows == []
 
 
 def test_publish_combined_snapshot_keeps_leaders_only(tmp_path) -> None:
@@ -840,6 +893,88 @@ def test_calculate_breadth_score_basic() -> None:
     )
     assert out["breadth_score"] is not None
     assert out["relative_up_ratio"] == 0.2
+
+
+def test_calculate_persistence_slope_is_positive_when_rs_rises() -> None:
+    current = {
+        "date": "2026-05-09",
+        "major_category": "A",
+        "middle_category": None,
+        "theme_rs": 50.0,
+        "theme_rank": 1,
+        "total_value_traded": 100.0,
+    }
+    history = [
+        {
+            "date": f"2026-05-0{day}",
+            "major_category": "A",
+            "middle_category": None,
+            "theme_rs": rs,
+            "theme_rank": 1,
+            "total_value_traded": 100.0,
+        }
+        for day, rs in [(8, 40.0), (7, 30.0), (6, 20.0), (5, 10.0)]
+    ]
+
+    out = calculate_persistence_score(current, history, ("A", None))
+
+    assert out["rs_slope_5d"] == 10.0
+    assert out["value_ratio_5d_20d"] is None
+
+
+def test_calculate_persistence_deduplicates_same_trading_date() -> None:
+    current = {
+        "date": "2026-05-09",
+        "major_category": "A",
+        "middle_category": None,
+        "theme_rs": 50.0,
+        "theme_rank": 1,
+        "total_value_traded": 100.0,
+    }
+    history = []
+    for day, rs in [(8, 40.0), (7, 30.0), (6, 20.0), (5, 10.0)]:
+        row = {
+            "date": f"2026-05-0{day}",
+            "major_category": "A",
+            "middle_category": None,
+            "theme_rs": rs,
+            "theme_rank": 1,
+            "total_value_traded": 100.0,
+        }
+        history.extend([row, dict(row)])
+
+    out = calculate_persistence_score(current, history, ("A", None))
+
+    assert out["rs_avg_5d"] == 30.0
+
+
+def test_value_expansion_uses_all_members_and_reports_coverage() -> None:
+    out = calculate_value_expansion_ratio(
+        ["1", "2", "3", "4"],
+        {
+            "000001": {"avg5": 200.0, "avg20": 100.0},
+            "000002": {"avg5": 100.0, "avg20": 100.0},
+            "000003": {"avg5": 160.0, "avg20": 100.0},
+            "000004": {"avg5": 120.0, "avg20": 100.0},
+        },
+    )
+
+    assert out == {
+        "ratio": 0.5,
+        "valid_member_count": 4,
+        "member_count": 4,
+        "coverage_ratio": 1.0,
+    }
+
+
+def test_value_expansion_is_missing_when_member_coverage_is_too_low() -> None:
+    out = calculate_value_expansion_ratio(
+        ["1", "2", "3", "4"],
+        {"000001": {"avg5": 200.0, "avg20": 100.0}},
+    )
+
+    assert out["ratio"] is None
+    assert out["coverage_ratio"] == 0.25
 
 
 def test_load_theme_history_rows_reads_combined_and_daily_snapshots(tmp_path) -> None:

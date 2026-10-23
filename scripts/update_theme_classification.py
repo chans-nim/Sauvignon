@@ -31,6 +31,57 @@ ADDITIONAL_SECTORS: dict[str, list[tuple[str, str]]] = {
     "035720": [("IT/플랫폼", "SW/AI")],                    # 카카오
 }
 
+# 공식 사업영역과 복수의 집중형 ETF 구성이 함께 지지하는 주분류 교정.
+# 이 목록은 기존 경로를 교체한다. 단기 테마보드 출현만으로는 추가하지 않는다.
+PRIMARY_SECTOR_OVERRIDES: dict[str, tuple[str, str]] = {
+    # PCB·패키지기판
+    "009150": ("반도체", "PCB/패키지기판"),  # 삼성전기
+    "011070": ("반도체", "PCB/패키지기판"),  # LG이노텍
+    "007660": ("반도체", "PCB/패키지기판"),  # 이수페타시스
+    "353200": ("반도체", "PCB/패키지기판"),  # 대덕전자
+    "222800": ("반도체", "PCB/패키지기판"),  # 심텍
+    "007810": ("반도체", "PCB/패키지기판"),  # 코리아써키트
+    # 후공정·패키징·테스트
+    "036540": ("반도체", "OSAT/테스트"),     # SFA반도체
+    "200470": ("반도체", "OSAT/테스트"),     # 에이팩트
+    "067310": ("반도체", "OSAT/테스트"),     # 하나마이크론
+    "033640": ("반도체", "OSAT/테스트"),     # 네패스
+    "330860": ("반도체", "OSAT/테스트"),     # 네패스아크
+    "061970": ("반도체", "OSAT/테스트"),     # LB세미콘
+    "131970": ("반도체", "OSAT/테스트"),     # 두산테스나
+    "097800": ("반도체", "OSAT/테스트"),     # 윈팩
+    "033170": ("반도체", "OSAT/테스트"),     # 시그네틱스
+    "119830": ("반도체", "OSAT/테스트"),     # 아이텍
+    # 물류(해운사와 분리)
+    "000120": ("인프라", "물류"),             # CJ대한통운
+    "086280": ("인프라", "물류"),             # 현대글로비스
+    "002320": ("인프라", "물류"),             # 한진
+    "004140": ("인프라", "물류"),             # 동방
+    "004360": ("인프라", "물류"),             # 세방
+    "009070": ("인프라", "물류"),             # KCTC
+    "129260": ("인프라", "물류"),             # 인터지스
+    "124560": ("인프라", "물류"),             # 태웅로직스
+    "009180": ("인프라", "물류"),             # 한솔로지스틱스
+    # 금융 업종 세분화
+    "105560": ("금융", "금융지주"),            # KB금융
+    "055550": ("금융", "금융지주"),            # 신한지주
+    "086790": ("금융", "금융지주"),            # 하나금융지주
+    "316140": ("금융", "금융지주"),            # 우리금융지주
+    "138930": ("금융", "금융지주"),            # BNK금융지주
+    "175330": ("금융", "금융지주"),            # JB금융지주
+    "139130": ("금융", "금융지주"),            # iM금융지주
+    "071050": ("금융", "금융지주"),            # 한국금융지주
+    "029780": ("금융", "카드/여신"),            # 삼성카드
+    "021880": ("금융", "카드/여신"),            # 메이슨캐피탈
+    "016600": ("금융", "카드/여신"),            # 큐캐피탈
+    "023760": ("금융", "카드/여신"),            # 한국캐피탈
+    "377300": ("금융", "핀테크/결제"),          # 카카오페이
+    # 명백한 기존 오분류
+    "034220": ("IT/플랫폼", "디스플레이"),       # LG디스플레이
+    "066570": ("소비재", "가전/전자"),           # LG전자
+    "383220": ("소비재", "패션/의류"),          # F&F
+}
+
 # 대형 이차전지 셀 업체와 다른 사업모델을 분리한다.
 OTHER_BATTERY_CODES = {"082920", "091580", "004490", "126730"}
 
@@ -43,15 +94,17 @@ def update(data: dict[str, Any]) -> dict[str, Any]:
     stocks = [x for x in (data.get("stock_to_sectors") or []) if isinstance(x, dict)]
     for stock in stocks:
         code = str(stock.get("stockCode") or "").zfill(6)
-        paths: list[tuple[str, str]] = []
-        for sector in (stock.get("sectors") or []):
-            if not isinstance(sector, dict):
-                continue
-            path = PATH_RENAMES.get(_sector_tuple(sector), _sector_tuple(sector))
-            if code in OTHER_BATTERY_CODES and path == ("2차전지", "배터리셀"):
-                path = ("2차전지", "기타전지/부품")
-            if path not in paths:
-                paths.append(path)
+        override = PRIMARY_SECTOR_OVERRIDES.get(code)
+        paths: list[tuple[str, str]] = [override] if override else []
+        if not override:
+            for sector in (stock.get("sectors") or []):
+                if not isinstance(sector, dict):
+                    continue
+                path = PATH_RENAMES.get(_sector_tuple(sector), _sector_tuple(sector))
+                if code in OTHER_BATTERY_CODES and path == ("2차전지", "배터리셀"):
+                    path = ("2차전지", "기타전지/부품")
+                if path not in paths:
+                    paths.append(path)
         for path in ADDITIONAL_SECTORS.get(code, []):
             if path not in paths:
                 paths.append(path)
@@ -95,15 +148,18 @@ def update(data: dict[str, Any]) -> dict[str, Any]:
     multi_count = sum(1 for s in stocks if len(s.get("sectors") or []) > 1)
     data["schema_version"] = "2.1"
     data["description"] = "복수 테마 허용 분류. stock_to_sectors가 정본이며 major_categories는 호환용 파생 데이터." 
-    data["classification_as_of"] = "2026-09-22"
-    data["classification_method"] = "사업영역 기반 주분류 + 검증된 복수 테마; 광범위한 단순 수혜주는 제외"
+    data["classification_as_of"] = "2026-10-23"
+    data["classification_method"] = "공식 사업영역 기반 주분류 + 집중형 ETF 합의로 교차검증한 복수 테마; 광범위 ETF와 단순 수혜주는 제외"
     data["classification_notes"] = [
         "CRO와 CDMO, 반도체 테스트 서비스와 인터페이스 부품은 각각 포괄 중분류로 명시",
         "리튬일차전지·납축전지·배터리부품은 배터리셀에서 기타전지/부품으로 분리",
+        "PCB/패키지기판, OSAT/테스트, 물류, 금융지주, 카드/여신, 핀테크/결제를 독립 중분류로 분리",
+        "시장대표·배당·그룹주·커버드콜·인버스·레버리지 ETF는 분류 근거에서 제외",
         "시가총액·PER 필드는 원본 스냅샷 값이며 실시간 기초정보로 간주하지 않음",
     ]
     data["classification_sources"] = [
         "상장사 공식 홈페이지/IR 및 KRX KIND 공시",
+        "ETF 운용사 공식 구성종목 및 집중형 ETF 간 합의",
         "한국거래소 종목코드와 수집 시세 응답 교차검증",
     ]
     data["major_categories"] = majors

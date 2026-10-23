@@ -204,9 +204,16 @@ def calculate_persistence_score(
     def _match(r: dict[str, Any]) -> bool:
         return str(r.get("major_category") or "") == str(major or "") and (r.get("middle_category") == middle)
 
-    rows = [r for r in (history_rows or []) if isinstance(r, dict) and _match(r)]
-    # date desc (string YYYY-MM-DD)
-    rows.sort(key=lambda r: str(r.get("date") or ""), reverse=True)
+    matched = [r for r in (history_rows or []) if isinstance(r, dict) and _match(r)]
+    # Keep one observation per trading date. Combined and daily snapshots can
+    # coexist in the history directory and must not count as separate days.
+    matched.sort(key=lambda r: str(r.get("date") or ""), reverse=True)
+    rows_by_date: dict[str, dict[str, Any]] = {}
+    for row in matched:
+        date_key = str(row.get("date") or "").strip()
+        if date_key and date_key not in rows_by_date:
+            rows_by_date[date_key] = row
+    rows = list(rows_by_date.values())
 
     # prepend current row as "today"
     cur = dict(current_group or {})
@@ -235,11 +242,13 @@ def calculate_persistence_score(
         }
 
     rs5 = [float(r.get("theme_rs") or 0.0) for r in last5]
-    rs10 = [float(r.get("theme_rs") or 0.0) for r in last10] if last10 else []
+    rs10 = [float(r.get("theme_rs") or 0.0) for r in last10] if len(last10) >= 10 else []
 
     rs_avg_5d = sum(rs5) / len(rs5) if rs5 else 0.0
     rs_avg_10d = (sum(rs10) / len(rs10)) if rs10 else None
-    rs_slope_5d = _calc_simple_slope(rs5)
+    # rows are newest -> oldest, while a positive slope should mean that RS is
+    # rising through time.  Calculate it in chronological order.
+    rs_slope_5d = _calc_simple_slope(list(reversed(rs5)))
 
     top3 = sum(1 for r in last5 if 1 <= int(r.get("theme_rank") or 10_000) <= 3)
     top5_10d = sum(1 for r in last10 if 1 <= int(r.get("theme_rank") or 10_000) <= 5)
@@ -247,7 +256,7 @@ def calculate_persistence_score(
     val5 = [float(r.get("total_value_traded") or 0.0) for r in last5]
     val20 = [float(r.get("total_value_traded") or 0.0) for r in last20]
     avg5 = (sum(val5) / len(val5)) if val5 else 0.0
-    avg20 = (sum(val20) / len(val20)) if val20 else 0.0
+    avg20 = (sum(val20) / len(val20)) if len(val20) >= 20 else 0.0
 
     if avg20 <= 0:
         value_ratio_5d_20d = None
@@ -323,6 +332,42 @@ def calculate_breadth_score(
     }
 
 
+def calculate_value_expansion_ratio(
+    member_symbols: list[str],
+    value_averages: dict[str, dict[str, float]],
+    *,
+    expansion_threshold: float = 1.5,
+    minimum_coverage: float = 0.5,
+) -> dict[str, Any]:
+    """Calculate breadth of trading-value expansion across all group members.
+
+    A result based on only a few available members is more misleading than a
+    missing result, so groups below ``minimum_coverage`` return ``ratio=None``.
+    """
+    symbols = sorted({_norm_kis_stock_symbol(s) for s in member_symbols if _norm_kis_stock_symbol(s)})
+    valid = 0
+    expanded = 0
+    for symbol in symbols:
+        averages = value_averages.get(symbol) or {}
+        avg5 = _safe_float(averages.get("avg5"), 0.0)
+        avg20 = _safe_float(averages.get("avg20"), 0.0)
+        if avg20 <= 0.0:
+            continue
+        valid += 1
+        if avg5 / avg20 >= float(expansion_threshold):
+            expanded += 1
+
+    total = len(symbols)
+    coverage = (valid / total) if total else 0.0
+    ratio = (expanded / valid) if valid and coverage >= float(minimum_coverage) else None
+    return {
+        "ratio": round(float(ratio), 3) if ratio is not None else None,
+        "valid_member_count": valid,
+        "member_count": total,
+        "coverage_ratio": round(float(coverage), 3),
+    }
+
+
 def _theme_history_snapshot_path(history_dir: Path, date_yyyy_mm_dd: str) -> Path:
     return Path(history_dir) / f"theme_snapshot_{_date_yyyymmdd(date_yyyy_mm_dd)}.json"
 
@@ -333,6 +378,11 @@ def _theme_history_combined_snapshot_path(history_dir: Path) -> Path:
 
 def _normalize_leader_history_row(r: dict[str, Any]) -> dict[str, Any] | None:
     if str(r.get("leader_status") or "").strip() != "주도":
+        return None
+    # Older snapshots promoted rank fallbacks to `주도` even when the live
+    # evaluation was 관심/중립.  Do not carry those synthetic leaders forward.
+    source_status = str(r.get("source_leader_status") or "").strip()
+    if source_status and source_status != "주도":
         return None
     d = str(r.get("date") or "").strip()
     if not d:
@@ -566,7 +616,7 @@ def _theme_history_row_from_report_row(row: dict[str, Any], date_yyyy_mm_dd: str
         "up_ratio": float(a.get("up_ratio") or 0.0),
         "rs60_ratio": float(a.get("rs60_ratio") or 0.0),
         "rs70_ratio": float(a.get("rs70_ratio") or 0.0),
-        "leader_status": "주도",
+        "leader_status": str(a.get("leader_status") or ""),
         "source_leader_status": str(a.get("leader_status") or ""),
         "leader_top_stocks": top_stocks,
     }
@@ -581,17 +631,9 @@ def _build_theme_history_snapshot_rows(
 ) -> list[dict[str, Any]]:
     all_rows = list(major_rows) + list(middle_rows)
     leaders = [r for r in all_rows if dict(r.get("analysis") or {}).get("leader_status") == "주도"]
-    selected = leaders
-    if not selected:
-        selected = sorted(
-            all_rows,
-            key=lambda r: (
-                -float(dict(r.get("analysis") or {}).get("relative_strength_score") or 0.0),
-                int(dict(r.get("analysis") or {}).get("relative_strength_rank") or 999999),
-                str(r.get("display_path") or ""),
-            ),
-        )[: max(1, int(fallback_count))]
-    return [_theme_history_row_from_report_row(r, date_yyyy_mm_dd) for r in selected]
+    # Calendar/history is explicitly a strict-leader view.  Rank fallbacks are
+    # already available in metric_rows and must not be relabelled as leaders.
+    return [_theme_history_row_from_report_row(r, date_yyyy_mm_dd) for r in leaders]
 
 
 def _build_theme_metric_history_rows(
@@ -1193,10 +1235,12 @@ def _load_symbol_value_averages(symbols: list[str], *, lookback_days: int = 30) 
     for sym in syms:
         sub = df[df["symbol"] == sym].sort_values("d", ascending=False)
         vals = [float(x) for x in list(sub["value"].values) if float(x) > 0.0]
-        if not vals:
+        # avg20 must mean 20 observations. Partial histories are reported as
+        # unavailable and handled by the breadth coverage gate.
+        if len(vals) < 20:
             continue
-        avg5 = sum(vals[:5]) / min(5, len(vals))
-        avg20 = sum(vals[:20]) / min(20, len(vals))
+        avg5 = sum(vals[:5]) / 5.0
+        avg20 = sum(vals[:20]) / 20.0
         out[sym] = {"avg5": float(avg5), "avg20": float(avg20)}
     return out
 
@@ -1690,7 +1734,7 @@ def _probe_top_symbols_per_group(
     n_member_total = sum(len(list(g.get("stocks") or [])) for g in groups)
     n_quote_seed = len(qmap)
     print(
-        "[probe] 1차 전체 탐색·프로브 시작 — "
+        "[probe] 1차 전체 탐색·프로브 시작 - "
         f"그룹 {len(groups)}개(대분류 {n_major} / 중분류 {n_middle}), "
         f"구성주 합계(중복 포함) {n_member_total}종, top_n={n}, "
         f"시세 맵(프로브 입력) {n_quote_seed}종, "
@@ -1721,7 +1765,7 @@ def _probe_top_symbols_per_group(
                 out.add(sym)
     elapsed = time.perf_counter() - t0
     print(
-        "[probe] 1차 완료 — "
+        "[probe] 1차 완료 - "
         f"{elapsed:.2f}s  "
         f"시세·프로그램 API 예정 심볼 {len(out)}개(그룹별 상위 top_n 합집합·중복 제거)"
         + (f"  구성 0종 스킵 그룹 {skipped_empty}개" if skipped_empty else "")
@@ -1747,7 +1791,7 @@ def _select_quote_symbols(
     """
     if enrichment_mode == "all":
         print(
-            "[probe] 1차 프로브 생략 — enrichment_mode=all "
+            "[probe] 1차 프로브 생략 - enrichment_mode=all "
             "(전 구성주 + 라이브 랭킹 심볼에 시세·프로그램 보강)"
         )
         symbols: set[str] = {_norm_kis_stock_symbol(s) for s in live_signal_map.keys() if _norm_kis_stock_symbol(s)}
@@ -1761,7 +1805,7 @@ def _select_quote_symbols(
                     symbols.add(sym)
         out_all = sorted(symbols)
         print(
-            f"[probe] all 모드 시세 대상 요약 — "
+            f"[probe] all 모드 시세 대상 요약 - "
             f"고유 심볼 {len(out_all)}개 (라이브 키·전 그룹 구성주 합집합)"
         )
         return out_all
@@ -2001,11 +2045,20 @@ def _analyze_group_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             leader_status = "중립"
         else:
             leader_status = "약세"
+        member_count = int(a.get("member_count") or 0)
+        leader_eligible = cohort != "middle" or member_count >= 3
+        if not leader_eligible:
+            leader_status = "표본부족"
+            signals.append("구성 3종목 미만으로 주도 판정 제외")
+        elif cohort == "middle" and member_count < 8 and leader_status == "주도":
+            leader_status = "관심"
+            signals.append("구성 8종목 미만으로 주도 판정 보류")
         a["relative_strength_score"] = score
         a["relative_strength_rank"] = rank_by_index[idx]
         a["relative_strength_total"] = total
         a["group_score_eval_scope"] = f"전체 {g_label} {total}개 그룹끼리만 비교(대분류/중분류 혼합 없음)"
         a["leader_status"] = leader_status
+        a["leader_eligible"] = leader_eligible
         a["leader_signal_count"] = len(signals)
         a["leader_signals"] = signals
         row["analysis"] = a
@@ -2115,7 +2168,7 @@ def _render_leaderboard_md_v2(
     tpn_label = f"Top{int(top_n)} 평균"
     lines.extend(
         [
-            f"| 순위 | 섹터 | ThemeScoreV2 | 기존RS | 지속성 | 확산도 | 품질 | {tpn_label} | 종목수 |",
+            f"| 순위 | 섹터 | ThemeScoreV2 | 기존RS | 지속성 | 확산도 | 지속·확산 평가 | {tpn_label} | 종목수 |",
             "| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |",
         ]
     )
@@ -2159,9 +2212,10 @@ def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[
         ql = str(a.get("theme_quality_label") or "").strip()
         if ql:
             lines.append(
-                "- 테마 품질: **{}**  |  ThemeScoreV2: `{}`  |  지속성: `{}`  |  확산도: `{}`".format(
+                "- 지속·확산 평가: **{}**  |  ThemeScoreV2: `{}`  |  현재 RS: `{}`  |  지속성: `{}`  |  확산도: `{}`".format(
                     ql,
                     a.get("theme_score_v2", "-"),
+                    a.get("relative_strength_score", "-"),
                     a.get("persistence_score", "-") if a.get("persistence_score") is not None else "데이터부족",
                     a.get("breadth_score", "-") if a.get("breadth_score") is not None else "데이터부족",
                 )
@@ -2176,10 +2230,11 @@ def _render_group_section_md(rows: list[dict[str, Any]], *, title: str) -> list[
                 )
             )
             lines.append(
-                "- Breadth: RS60+ `{}` / 상대상승 `{}` / 대금확산 `{}`".format(
+                "- Breadth: RS60+ `{}` / 상대상승 `{}` / 대금확산 `{}` / 대금 데이터 커버 `{}`".format(
                     _fmt_pct(_safe_float(a.get("rs60_ratio"), 0.0)),
                     (f"{float(a.get('relative_up_ratio'))*100.0:+.1f}%p" if a.get("relative_up_ratio") is not None else "데이터부족"),
                     (f"{_fmt_pct(_safe_float(a.get('value_expansion_ratio'), 0.0))}" if a.get("value_expansion_ratio") is not None else "데이터부족"),
+                    _fmt_pct(_safe_float(a.get("value_expansion_coverage_ratio"), 0.0)),
                 )
             )
         lines.append(
@@ -2307,7 +2362,7 @@ def _render_theme_summary_md(
             major_rows,
             title="대분류 Leaderboard (ThemeScoreV2)",
             top_n=top_n,
-            footnote="ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%). (데이터 부족 시 품질/점수는 '데이터부족')",
+            footnote="ThemeScoreV2 = 현재 RS(60%) + 지속성(20%) + 확산도(20%). 지속·확산 평가는 현재 RS를 제외한 두 축의 구조 판정입니다.",
         )
     )
     lines.extend(["</details>", "", "<details>", "<summary>중분류 Leaderboard</summary>", ""])
@@ -2325,7 +2380,7 @@ def _render_theme_summary_md(
             middle_rows,
             title="중분류 Leaderboard (ThemeScoreV2)",
             top_n=top_n,
-            footnote="ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%). (데이터 부족 시 품질/점수는 '데이터부족')",
+            footnote="ThemeScoreV2 = 현재 RS(60%) + 지속성(20%) + 확산도(20%). 지속·확산 평가는 현재 RS를 제외한 두 축의 구조 판정입니다.",
         )
     )
     lines.extend(["</details>", "", "<details open>", "<summary>대분류 섹터 카드</summary>", ""])
@@ -2400,7 +2455,7 @@ def _render_leaderboard_html_v2(
     parts = [f"<details class=\"section fold\"{open_attr}><summary class=\"section-title\">{_escape_html(title)}</summary><div class=\"leaderboard\">"]
     parts.append(
         "<table class=\"leaderboard-table\"><thead><tr>"
-        "<th>순위</th><th>섹터</th><th>ThemeScoreV2</th><th>기존RS</th><th>지속성</th><th>확산도</th><th>테마품질</th>"
+        "<th>순위</th><th>섹터</th><th>ThemeScoreV2</th><th>기존RS</th><th>지속성</th><th>확산도</th><th>지속·확산 평가</th>"
         f"<th>{_escape_html(tpn_h)}</th><th>종목수</th>"
         "</tr></thead><tbody>"
     )
@@ -2490,7 +2545,7 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
             )
         parts.append("<div class=\"metrics\">")
         metric_pairs = [
-            ("테마 품질", a.get("theme_quality_label") or "-", None),
+            ("지속·확산 평가", a.get("theme_quality_label") or "-", None),
             ("ThemeScoreV2", a.get("theme_score_v2") if a.get("theme_score_v2") is not None else "데이터부족", None),
             ("지속성", a.get("persistence_score") if a.get("persistence_score") is not None else "데이터부족", None),
             ("확산도", a.get("breadth_score") if a.get("breadth_score") is not None else "데이터부족", None),
@@ -2502,6 +2557,7 @@ def _render_group_cards_html(rows: list[dict[str, Any]], *, title: str, open_by_
             ("RS60+ 비중(정의)", _fmt_pct(_safe_float(a.get("rs60_ratio"), 0.0)), None),
             ("상대 상승비율", f"{float(_safe_float(a.get('relative_up_ratio'), 0.0))*100.0:+.1f}%p" if a.get("relative_up_ratio") is not None else "데이터부족", None),
             ("거래대금 확산비율", _fmt_pct(_safe_float(a.get("value_expansion_ratio"), 0.0)) if a.get("value_expansion_ratio") is not None else "데이터부족", None),
+            ("대금확산 데이터 커버", _fmt_pct(_safe_float(a.get("value_expansion_coverage_ratio"), 0.0)), None),
             ("대표등락 코호트%", a.get("rep_top_return_cohort_pct"), None),
             ("대표대금합 코호트%", a.get("rep_top_value_sum_cohort_pct"), None),
             ("라이브커버 코호트%", a.get("live_cover_cohort_pct"), None),
@@ -2661,9 +2717,9 @@ def _render_theme_report_html(
         "</div></section>"
         f"{_render_theme_history_section_html(hist, history_by_date=history_by_date, history_calendar_anchor=history_calendar_anchor, calendar_display_by_date=calendar_display_by_date)}"
         f"{_render_leaderboard_html(major_rows, title='대분류 Leaderboard', top_n=top_n, open_by_default=True, footnote='그룹 점수는 다른 대분류와만 비교. 종목 RS·백분위·대표는 해당 대분류(하위 전체, 종목 중복 제거) 구성만 기준.')}"
-        f"{_render_leaderboard_html_v2(major_rows, title='대분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%).')}"
+        f"{_render_leaderboard_html_v2(major_rows, title='대분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 현재 RS(60%) + 지속성(20%) + 확산도(20%). 지속·확산 평가는 현재 RS를 제외한 두 축의 구조 판정입니다.')}"
         f"{_render_leaderboard_html(middle_rows, title='중분류 Leaderboard', top_n=top_n, open_by_default=False, footnote='그룹 점수는 다른 중분류와만 비교(대분류 랭킹과 별도). 종목 RS·백분위·대표는 그 중분류에만 싣은 구성으로만. 표본이 적은 중분류는 지표가 요동칠 수 있음.')}"
-        f"{_render_leaderboard_html_v2(middle_rows, title='중분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 기존RS(60%) + Persistence(20%) + Breadth(20%).')}"
+        f"{_render_leaderboard_html_v2(middle_rows, title='중분류 Leaderboard (ThemeScoreV2)', top_n=top_n, open_by_default=False, footnote='ThemeScoreV2 = 현재 RS(60%) + 지속성(20%) + 확산도(20%). 지속·확산 평가는 현재 RS를 제외한 두 축의 구조 판정입니다.')}"
         f"{_render_group_cards_html(major_rows, title='대분류 섹터 카드', open_by_default=True)}"
         f"{_render_group_cards_html(middle_rows, title='중분류 섹터 카드', open_by_default=False)}"
         "</div></body></html>"
@@ -2868,7 +2924,7 @@ def main() -> None:
             if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
                 raise
             print(
-                f"[theme-history] WARNING: GitHub 동기화 실패 — 로컬 `data/theme_history` 만 사용합니다: {exc}",
+                f"[theme-history] WARNING: GitHub 동기화 실패 - 로컬 `data/theme_history` 만 사용합니다: {exc}",
                 file=sys.stderr,
             )
     else:
@@ -2921,7 +2977,7 @@ def main() -> None:
         probe_syms = _all_unique_stock_symbols_from_groups(all_groups)
         probe_minimal_target_n = len(probe_syms)
         print(
-            f"[probe] 1차 최소 시세(현재가·등락·거래대금, 프로그램 제외) — "
+            f"[probe] 1차 최소 시세(현재가·등락·거래대금, 프로그램 제외) - "
             f"{probe_minimal_target_n}종  workers={ew}"
         )
         t_pq = time.perf_counter()
@@ -3077,7 +3133,7 @@ def main() -> None:
     print(
         f"[theme-history] 이번 실행 persistence/v2 입력: flatten row {len(history_rows)}줄, "
         f"날짜 종류 {len(dates_in_rows)}개 ({dates_in_rows[0] if dates_in_rows else '-'} ~ "
-        f"{dates_in_rows[-1] if dates_in_rows else '-'}) — 최근 날짜 최대 {THEME_HISTORY_LOAD_MAX_FILES}개만 로드"
+        f"{dates_in_rows[-1] if dates_in_rows else '-'}) - 최근 날짜 최대 {THEME_HISTORY_LOAD_MAX_FILES}개만 로드"
     )
 
     # market_up_ratio: classification 전체(고유 심볼) 중 당일 상승 비율
@@ -3097,6 +3153,14 @@ def main() -> None:
 
     # per-symbol value expansion stats from silver snapshot (avg5/avg20)
     value_avgs = _load_symbol_value_averages(all_unique_syms, lookback_days=30)
+    member_symbols_by_group = {
+        (
+            str(group.get("group_type") or ""),
+            str(group.get("major_category") or ""),
+            group.get("middle_category"),
+        ): [str(stock.get("symbol") or "") for stock in (group.get("stocks") or [])]
+        for group in major_blueprints + middle_blueprints
+    }
 
     def _inject_v2(rows: list[dict[str, Any]], *, cohort_history: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -3125,33 +3189,14 @@ def main() -> None:
             pers = calculate_persistence_score(cur_snap, cohort_history, key)
             breadth_inputs_member_count = int(a.get("member_count") or 0)
 
-            # value_expansion_ratio: 구성 종목 중 (avg5/avg20 >= 1.5) 비중
-            expanded_cnt = 0
-            denom = 0
-            for m in (row.get("major_stocks") or []):
-                # NOTE: major_stocks 는 top_n slice 이라 breadth member set으로는 부족.
-                # expansion 은 "구성 종목 전체"가 원칙인데, 현재 row에는 전체 members가 없어서
-                # 여기서는 최소한 분석 스냅샷(분류 전체) 기반의 평균으로 계산하지 않고,
-                # member_count 기준의 대표종목(표시대상) 프록시로 둔다.
-                pass
-            # 프록시 대신: rs60_ratio/up_ratio 를 all_members 기준으로 이미 계산했으므로,
-            # expansion 도 동일하게 all_members 가 필요. 현 구조에서는 members 리스트를 보존하지 않기 때문에,
-            # value_expansion_ratio 는 major_stocks(대표) 기반으로 근사한다.
-            for m in (row.get("major_stocks") or []):
-                sym = _norm_kis_stock_symbol(m.get("symbol", ""))
-                if not sym:
-                    continue
-                av = value_avgs.get(sym)
-                if not av:
-                    continue
-                avg20 = float(av.get("avg20") or 0.0)
-                avg5 = float(av.get("avg5") or 0.0)
-                if avg20 <= 0:
-                    continue
-                denom += 1
-                if (avg5 / avg20) >= 1.5:
-                    expanded_cnt += 1
-            value_expansion_ratio = (expanded_cnt / denom) if denom > 0 else None
+            value_expansion = calculate_value_expansion_ratio(
+                member_symbols_by_group.get(
+                    (str(row.get("group_type") or ""), major, middle),
+                    [],
+                ),
+                value_avgs,
+            )
+            value_expansion_ratio = value_expansion["ratio"]
 
             br = calculate_breadth_score(
                 member_count=breadth_inputs_member_count,
@@ -3178,6 +3223,9 @@ def main() -> None:
                     "up_ratio": br.get("up_ratio", a.get("up_ratio", 0.0)),
                     "relative_up_ratio": br.get("relative_up_ratio"),
                     "value_expansion_ratio": br.get("value_expansion_ratio"),
+                    "value_expansion_valid_member_count": value_expansion["valid_member_count"],
+                    "value_expansion_member_count": value_expansion["member_count"],
+                    "value_expansion_coverage_ratio": value_expansion["coverage_ratio"],
                 }
             )
 
