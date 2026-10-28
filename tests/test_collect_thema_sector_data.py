@@ -34,6 +34,7 @@ from scripts.collect_thema_sector_data import (
     _render_theme_report_html,
     _resolve_classification_json,
     _validate_classification_data,
+    _write_theme_history_snapshot,
 )
 from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
 
@@ -206,7 +207,7 @@ def test_build_thema_rows_and_render_html() -> None:
     assert 'class="neg"' in html
     assert ">RS<" in html
     assert "Theme RS" not in html
-    assert "주도테마 캘린더·히스토리" in html
+    assert "주도·관심 테마 캘린더·히스토리" in html
     assert "cal-wrap" in html
 
 
@@ -304,6 +305,34 @@ def test_build_theme_daily_leader_history_sections_prefers_today_live() -> None:
     assert "2026-05-10" in by_d
     assert by_d["2026-05-10"][0]["leader_top_stocks"][0]["symbol"] == "000002"
     assert "2026-05-01" in by_d
+
+
+def test_theme_history_keeps_watch_dates_and_labels_them() -> None:
+    history_rows = [
+        {
+            "date": "2026-10-28",
+            "group_type": "major",
+            "major_category": "반도체",
+            "leader_status": "관심",
+            "theme_rs": 66.4,
+            "theme_rank": 1,
+        }
+    ]
+
+    sections = _build_theme_daily_leader_history_sections(
+        history_rows,
+        "2026-10-29",
+        [],
+        [],
+        top_n=3,
+        max_days=5,
+    )
+    by_date = dict(sections)
+
+    assert by_date["2026-10-28"][0]["leader_status"] == "관심"
+    html = _render_theme_history_calendar_html(by_date, "2026-10-29")
+    assert "반도체" in html
+    assert '<span class="cal-tag">관심</span>' in html
 
 
 def test_theme_history_calendar_shows_one_stock_per_theme() -> None:
@@ -705,6 +734,16 @@ def test_publish_combined_snapshot_keeps_leaders_only(tmp_path) -> None:
                         "theme_rs": 55.0,
                         "theme_rank": 3,
                         "leader_top_stocks": [{"symbol": "111111", "name": "제외", "rs": 70.0}],
+                    }
+                ],
+                "metric_rows": [
+                    {
+                        "date": "2026-05-12",
+                        "group_type": "major",
+                        "major_category": "중립테마",
+                        "leader_status": "중립",
+                        "theme_rs": 55.0,
+                        "theme_rank": 3,
                     }
                 ],
             },
@@ -1146,3 +1185,67 @@ def test_write_daily_snapshot_from_overview_rebuilds_release_day(tmp_path) -> No
     assert len(payload["rows"]) == 1
     assert payload["rows"][0]["leader_top_stocks"][0]["symbol"] == "000001"
     assert len(payload["metric_rows"]) == 2
+
+
+def test_daily_snapshot_write_is_verified_and_complete(tmp_path) -> None:
+    metric_rows = [
+        {
+            "date": "2026-10-29",
+            "group_type": "major",
+            "major_category": "반도체",
+            "leader_status": "관심",
+        }
+    ]
+
+    path = _write_theme_history_snapshot(
+        tmp_path,
+        date_yyyy_mm_dd="2026-10-29",
+        rows=[],
+        metric_rows=metric_rows,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path.name == "theme_snapshot_20261029.json"
+    assert payload["date"] == "2026-10-29"
+    assert payload["metric_rows"] == metric_rows
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_daily_snapshot_write_rejects_empty_metrics(tmp_path) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="complete daily theme set"):
+        _write_theme_history_snapshot(
+            tmp_path,
+            date_yyyy_mm_dd="2026-10-29",
+            rows=[],
+            metric_rows=[],
+        )
+
+
+def test_publish_rejects_missing_daily_snapshot_even_with_old_combined(tmp_path) -> None:
+    from scripts.publish_theme_sector_release import write_combined_snapshot
+
+    (tmp_path / "theme_history_snapshot.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-10-28",
+                "rows": [],
+                "metric_rows": [
+                    {
+                        "date": "2026-10-28",
+                        "group_type": "major",
+                        "major_category": "반도체",
+                        "leader_status": "관심",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    import pytest
+
+    with pytest.raises(SystemExit, match="theme history snapshot not found"):
+        write_combined_snapshot(tmp_path, "2026-10-29", tmp_path / "out.json")

@@ -144,8 +144,17 @@ def write_combined_snapshot(history_dir: Path, snapshot_date_yyyy_mm_dd: str, ou
         files.append(combined)
     files.extend(sorted(Path(history_dir).glob("theme_snapshot_*.json"), key=lambda p: p.name))
     today_file = Path(history_dir) / f"theme_snapshot_{_date_yyyymmdd(snapshot_date_yyyy_mm_dd)}.json"
-    if not today_file.is_file() and not combined.is_file():
+    if not today_file.is_file():
         raise SystemExit(f"theme history snapshot not found: {today_file}")
+
+    today_payload = json.loads(today_file.read_text(encoding="utf-8"))
+    today_metrics = today_payload.get("metric_rows") if isinstance(today_payload, dict) else None
+    if str(today_payload.get("date") or "") != str(snapshot_date_yyyy_mm_dd).strip():
+        raise SystemExit(f"theme history snapshot date mismatch: {today_file}")
+    if not isinstance(today_metrics, list) or not today_metrics:
+        raise SystemExit(f"theme history snapshot has no metric rows: {today_file}")
+    if any(str(row.get("date") or "") != snapshot_date_yyyy_mm_dd for row in today_metrics if isinstance(row, dict)):
+        raise SystemExit(f"theme history snapshot contains mismatched metric dates: {today_file}")
 
     by_key: dict[tuple[str, str, str, str, str], dict] = {}
     metric_by_key: dict[tuple[str, str, str, str, str], dict] = {}
@@ -192,6 +201,8 @@ def write_combined_snapshot(history_dir: Path, snapshot_date_yyyy_mm_dd: str, ou
         "rows": rows,
         "metric_rows": metric_rows,
     }
+    if not any(str(row.get("date") or "") == snapshot_date_yyyy_mm_dd for row in metric_rows):
+        raise SystemExit(f"combined theme history omitted snapshot date: {snapshot_date_yyyy_mm_dd}")
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return out_path
 
