@@ -166,6 +166,57 @@ def _date_yyyymmdd(d: str) -> str:
     return str(d).replace("-", "")
 
 
+def _resolve_latest_common_trading_date(
+    client: Any,
+    collected_at: str,
+    quotes_by_symbol: dict[str, dict[str, Any]] | None = None,
+    *,
+    anchor_symbols: tuple[str, ...] = ("005930", "000660", "069500"),
+) -> str:
+    """Resolve the latest date traded by every liquid anchor symbol.
+
+    A report can run after midnight or on a weekend while its quotes still
+    belong to the previous session.  Snapshot persistence must use that
+    session date, not the wall-clock collection date.
+    """
+    explicit_dates = {
+        str(q.get("trading_date") or q.get("trade_date") or "").strip()
+        for q in (quotes_by_symbol or {}).values()
+        if isinstance(q, dict) and str(q.get("trading_date") or q.get("trade_date") or "").strip()
+    }
+    explicit_dates = {d for d in explicit_dates if _parse_iso_date(d)}
+    if len(explicit_dates) == 1:
+        return next(iter(explicit_dates))[:10]
+
+    try:
+        frame = client.fetch_price_history_frame(list(anchor_symbols), days=14)
+        if frame is not None and not bool(getattr(frame, "empty", True)):
+            common = frame.dropna(axis=0, how="any")
+            if not bool(getattr(common, "empty", True)):
+                latest = common.index.max()
+                if hasattr(latest, "date"):
+                    return latest.date().isoformat()
+                parsed = _parse_iso_date(str(latest))
+                if parsed:
+                    return parsed
+    except Exception as exc:
+        print(f"[theme-history] latest common trading date lookup failed: {exc}", file=sys.stderr)
+
+    # A weekday run after the regular close can safely use its KST date.  For
+    # pre-market, after-midnight, weekend, or holiday runs, refusing to persist
+    # is safer than creating a snapshot under a non-trading date.
+    try:
+        collected_dt = _dt.datetime.fromisoformat(str(collected_at).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError(f"cannot resolve snapshot trading date from {collected_at!r}") from exc
+    if collected_dt.weekday() < 5 and (collected_dt.hour, collected_dt.minute) >= (15, 30):
+        return collected_dt.date().isoformat()
+    raise RuntimeError(
+        "latest common trading date is unavailable; refusing to save a snapshot "
+        f"using collection date {collected_dt.date().isoformat()}"
+    )
+
+
 def classify_theme_quality(persistence_score: float | None, breadth_score: float | None) -> str:
     if persistence_score is None or breadth_score is None:
         return "데이터부족"
@@ -3170,7 +3221,8 @@ def main() -> None:
     print(f"[timing] build_rows  {time.perf_counter() - t_rows:.2f}s")
 
     # --- Persistence/Breadth: load history + compute v2 metrics ---
-    # Determine "today" date for snapshot key.
+    # Keep report generation time separate from the market session date.  A
+    # run after midnight/weekend still contains the previous trading session.
     collected_at = max(
         [
             str(m.get("analysis", {}).get("collected_at", ""))
@@ -3183,7 +3235,15 @@ def main() -> None:
         from scripts.collect_sector_data import _now_kst_iso
 
         collected_at = _now_kst_iso()
-    today_yyyy_mm_dd = _parse_iso_date(collected_at) or str(_dt.date.today().isoformat())
+    today_yyyy_mm_dd = _resolve_latest_common_trading_date(
+        client,
+        collected_at,
+        quotes_by_symbol,
+    )
+    print(
+        f"[theme-history] snapshot trading date={today_yyyy_mm_dd} "
+        f"(collected_at={collected_at})"
+    )
 
     history_rows = _load_theme_history_rows(history_dir, max_days=THEME_HISTORY_LOAD_MAX_FILES)
     leader_history_rows = _load_theme_history_rows(
@@ -3366,6 +3426,7 @@ def main() -> None:
         "source_file": data.get("source_file"),
         "description": data.get("description"),
         "collected_at": collected_at,
+        "analysis_trading_date": today_yyyy_mm_dd,
         "theme_history_dir": str(history_dir),
         "theme_snapshot_date": today_yyyy_mm_dd,
         "theme_history_report_days": max(1, int(args.history_report_days)),

@@ -32,6 +32,7 @@ from scripts.collect_thema_sector_data import (
     _score_group_members,
     _select_quote_symbols,
     _render_theme_report_html,
+    _resolve_latest_common_trading_date,
     _resolve_classification_json,
     _validate_classification_data,
     _write_theme_history_snapshot,
@@ -1221,6 +1222,51 @@ def test_daily_snapshot_write_rejects_empty_metrics(tmp_path) -> None:
             rows=[],
             metric_rows=[],
         )
+
+
+def test_snapshot_date_uses_latest_common_trading_day_after_midnight() -> None:
+    import pandas as pd
+
+    class Client:
+        def fetch_price_history_frame(self, symbols, *, days=14):
+            assert symbols == ["005930", "000660", "069500"]
+            return pd.DataFrame(
+                {
+                    "005930": [220500.0, 221000.0],
+                    "000660": [1487000.0, 1490000.0],
+                    "069500": [70000.0, 70100.0],
+                },
+                index=pd.to_datetime(["2026-10-29", "2026-10-30"]),
+            )
+
+    resolved = _resolve_latest_common_trading_date(
+        Client(),
+        "2026-10-31T02:18:13+09:00",
+    )
+
+    assert resolved == "2026-10-30"
+
+
+def test_snapshot_date_refuses_weekend_collection_date_when_lookup_fails() -> None:
+    import pytest
+
+    class Client:
+        def fetch_price_history_frame(self, symbols, *, days=14):
+            raise RuntimeError("temporary API failure")
+
+    with pytest.raises(RuntimeError, match="refusing to save"):
+        _resolve_latest_common_trading_date(Client(), "2026-10-31T02:18:13+09:00")
+
+
+def test_snapshot_date_allows_weekday_after_close_fallback() -> None:
+    class Client:
+        def fetch_price_history_frame(self, symbols, *, days=14):
+            raise RuntimeError("temporary API failure")
+
+    assert (
+        _resolve_latest_common_trading_date(Client(), "2026-10-30T20:30:00+09:00")
+        == "2026-10-30"
+    )
 
 
 def test_publish_rejects_missing_daily_snapshot_even_with_old_combined(tmp_path) -> None:
