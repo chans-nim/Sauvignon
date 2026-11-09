@@ -98,6 +98,12 @@ STOCK_RS_W_VALUE = 0.35
 STOCK_RS_W_TRADE_STRENGTH = 0.10
 STOCK_RS_W_NEAR_HIGH = 0.05
 
+# A quote row containing only the last price is common before KRX opens. It
+# must not be treated as a complete daily observation: equal zero returns and
+# zero trading values turn percentile ranks into artificial RS 67/85 clusters.
+MARKET_DATA_MIN_QUOTE_COVERAGE = 0.95
+MARKET_DATA_MIN_TRADED_COVERAGE = 0.80
+
 
 def _repo_classification_json() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "theme" / _CLASSIFICATION_BASENAME
@@ -150,6 +156,75 @@ def _round1(x: Any) -> float | None:
         return round(float(x), 1)
     except Exception:
         return None
+
+
+def _quote_has_price(quote: dict[str, Any] | None) -> bool:
+    return _safe_float(dict(quote or {}).get("price"), 0.0) > 0.0
+
+
+def _quote_has_daily_activity(quote: dict[str, Any] | None) -> bool:
+    """Return whether a quote contains usable session activity."""
+    q = dict(quote or {})
+    if q.get("no_trade") is True:
+        return False
+    return (
+        q.get("return_pct") is not None
+        and (_safe_float(q.get("volume"), 0.0) > 0.0 or _safe_float(q.get("value_traded"), 0.0) > 0.0)
+    )
+
+
+def _market_data_quality(
+    quotes_by_symbol: dict[str, dict[str, Any]],
+    expected_symbols: list[str] | set[str],
+) -> dict[str, Any]:
+    """Measure whether quotes can support a recommendation-grade report."""
+    expected = sorted({_norm_kis_stock_symbol(s) for s in expected_symbols if _norm_kis_stock_symbol(s)})
+    expected_count = len(expected)
+    priced = [s for s in expected if _quote_has_price(quotes_by_symbol.get(s))]
+    no_trade = [s for s in expected if dict(quotes_by_symbol.get(s) or {}).get("no_trade") is True]
+    no_trade_set = set(no_trade)
+    required_traded = [s for s in expected if s not in no_trade_set]
+    active = [s for s in required_traded if _quote_has_daily_activity(quotes_by_symbol.get(s))]
+    quote_coverage = len(priced) / expected_count if expected_count else 0.0
+    traded_coverage = len(active) / len(required_traded) if required_traded else 0.0
+    valid = (
+        expected_count > 0
+        and quote_coverage >= MARKET_DATA_MIN_QUOTE_COVERAGE
+        and traded_coverage >= MARKET_DATA_MIN_TRADED_COVERAGE
+    )
+    priced_set = set(priced)
+    active_set = set(active)
+    return {
+        "valid": valid,
+        "expected_count": expected_count,
+        "priced_count": len(priced),
+        "active_count": len(active),
+        "no_trade_count": len(no_trade),
+        "quote_coverage_ratio": round(quote_coverage, 4),
+        "traded_coverage_ratio": round(traded_coverage, 4),
+        "missing_price_symbols": [s for s in expected if s not in priced_set],
+        "missing_activity_symbols": [s for s in required_traded if s not in active_set],
+    }
+
+
+def _require_recommendation_market_data(
+    quotes_by_symbol: dict[str, dict[str, Any]],
+    expected_symbols: list[str] | set[str],
+) -> dict[str, Any]:
+    quality = _market_data_quality(quotes_by_symbol, expected_symbols)
+    if quality["valid"]:
+        return quality
+    raise RuntimeError(
+        "recommendation market data incomplete; refusing to rank themes, save history, or publish report: "
+        f"price={quality['priced_count']}/{quality['expected_count']} "
+        f"({quality['quote_coverage_ratio']:.1%}), "
+        f"daily_activity={quality['active_count']}/"
+        f"{quality['expected_count'] - quality['no_trade_count']} "
+        f"({quality['traded_coverage_ratio']:.1%}); "
+        f"missing_price_sample={quality['missing_price_symbols'][:10]} "
+        f"missing_activity_sample={quality['missing_activity_symbols'][:10]}. "
+        "Run after the market data is finalized or check KIS quote fields/credentials."
+    )
 
 
 def _parse_iso_date(s: str) -> str | None:
@@ -349,7 +424,7 @@ def calculate_breadth_score(
     market_up_ratio: float | None,
     value_expansion_ratio: float | None,
 ) -> dict[str, Any]:
-    if member_count <= 0:
+    if member_count <= 0 or market_up_ratio is None:
         return {
             "breadth_score": None,
             "rs60_ratio": 0.0,
@@ -357,7 +432,7 @@ def calculate_breadth_score(
             "up_ratio": 0.0,
             "market_up_ratio": market_up_ratio,
             "relative_up_ratio": None,
-            "value_expansion_ratio": 0.0,
+            "value_expansion_ratio": value_expansion_ratio,
         }
 
     r60 = float(rs60_ratio or 0.0)
@@ -1441,6 +1516,8 @@ def _fetch_quote_enrichment_concurrent(
     max_workers: int = 4,
     fetch_quote: bool = True,
     fetch_program: bool = True,
+    trading_date: str | None = None,
+    use_daily_quote: bool = False,
     log_label: str = "[enrichment]",
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     """
@@ -1466,7 +1543,10 @@ def _fetch_quote_enrichment_concurrent(
         quote: dict[str, Any] = {}
         if fetch_quote:
             try:
-                q = client.fetch_stock_price(sym)
+                if use_daily_quote and trading_date and hasattr(client, "fetch_stock_daily_quote"):
+                    q = client.fetch_stock_daily_quote(sym, trading_date)
+                else:
+                    q = client.fetch_stock_price(sym)
                 if isinstance(q, dict) and q:
                     quote = q
             except Exception:
@@ -1479,7 +1559,10 @@ def _fetch_quote_enrichment_concurrent(
         if fetch_investor_for_this_symbol:
             try:
                 if hasattr(client, "fetch_foreign_institution_for_symbol"):
-                    d = client.fetch_foreign_institution_for_symbol(sym)
+                    try:
+                        d = client.fetch_foreign_institution_for_symbol(sym, trading_date=trading_date)
+                    except TypeError:
+                        d = client.fetch_foreign_institution_for_symbol(sym)
                     if isinstance(d, dict):
                         inv = d
             except Exception:
@@ -1489,7 +1572,10 @@ def _fetch_quote_enrichment_concurrent(
         if fetch_program:
             try:
                 if hasattr(client, "fetch_program_trade_net_for_symbol"):
-                    d = client.fetch_program_trade_net_for_symbol(sym)
+                    try:
+                        d = client.fetch_program_trade_net_for_symbol(sym, trading_date=trading_date)
+                    except TypeError:
+                        d = client.fetch_program_trade_net_for_symbol(sym)
                     if isinstance(d, dict) and d.get("program_net_tr_pbmn") is not None:
                         prog_val = {"program_net_tr_pbmn": d.get("program_net_tr_pbmn")}
             except Exception:
@@ -3065,6 +3151,16 @@ def main() -> None:
     major_blueprints, middle_blueprints = _build_group_blueprints(data)
     client = build_kis_client_for_mode(args.mode)
     client.authenticate()
+    from scripts.collect_sector_data import _now_kst_iso
+
+    run_collected_at = _now_kst_iso()
+    target_trading_date = _resolve_latest_common_trading_date(client, run_collected_at, {})
+    run_kst_date = _parse_iso_date(run_collected_at)
+    use_daily_session_api = bool(run_kst_date and target_trading_date != run_kst_date)
+    print(
+        f"[session] target trading date={target_trading_date} "
+        f"collection date={run_kst_date} daily_api={use_daily_session_api}"
+    )
     t_live = time.perf_counter()
     live_signal_map = _build_live_signal_map(client)
     print(f"[timing] live_signal_map  {time.perf_counter() - t_live:.2f}s")
@@ -3103,6 +3199,8 @@ def main() -> None:
                 fetch_investor_per_symbol=False,
                 max_workers=ew,
                 fetch_program=False,
+                trading_date=target_trading_date if use_daily_session_api else None,
+                use_daily_quote=use_daily_session_api,
                 log_label="[probe-quote]",
             )
         except Exception as exc:
@@ -3147,6 +3245,8 @@ def main() -> None:
                 # is already present; only program/investor enrichment is needed here.
                 fetch_quote=quote_enrichment_mode != "top_by_group",
                 fetch_program=True,
+                trading_date=target_trading_date if use_daily_session_api else None,
+                use_daily_quote=use_daily_session_api,
             )
             quotes_by_symbol.update(q2)
             investor_by_symbol.update(investor_extra)
@@ -3174,6 +3274,7 @@ def main() -> None:
                     max_workers=ew,
                     fetch_quote=False,
                     fetch_program=False,
+                    trading_date=target_trading_date if use_daily_session_api else None,
                     log_label="[investor-retry]",
                 )
                 investor_by_symbol.update(investor_retry)
@@ -3200,6 +3301,81 @@ def main() -> None:
                 if str(os.getenv("GITHUB_ACTIONS") or "").lower() == "true":
                     print(f"::error title=Investor enrichment incomplete::{message}", file=sys.stderr)
                 raise RuntimeError(message)
+
+        if args.strict_completeness:
+            required_program_symbols = sorted(
+                s
+                for s in {_norm_kis_stock_symbol(x) for x in quote_symbols}
+                if dict(quotes_by_symbol.get(s) or {}).get("no_trade") is not True
+            )
+            missing_program = [s for s in required_program_symbols if s not in program_by_symbol]
+            if missing_program:
+                print(
+                    "[enrichment] retrying program-only missing symbols: "
+                    f"{len(missing_program)}/{len(required_program_symbols)}"
+                )
+                _unused_quotes, _unused_investor, program_retry = _fetch_quote_enrichment_concurrent(
+                    client,
+                    missing_program,
+                    fetch_investor_per_symbol=False,
+                    max_workers=ew,
+                    fetch_quote=False,
+                    fetch_program=True,
+                    trading_date=target_trading_date if use_daily_session_api else None,
+                    log_label="[program-retry]",
+                )
+                program_by_symbol.update(program_retry)
+                missing_program = [s for s in required_program_symbols if s not in program_by_symbol]
+            if missing_program:
+                raise RuntimeError(
+                    "program enrichment incomplete after retry: "
+                    f"missing={len(missing_program)}/{len(required_program_symbols)} "
+                    f"missing_sample={missing_program[:20]}"
+                )
+
+        # Count-completeness alone is insufficient. Before open, KIS may
+        # return a price for every symbol while daily return/value/volume are
+        # all zero. Retry those rows once, then fail closed so a degraded run
+        # cannot overwrite a valid trading-day snapshot or be published.
+        activity_missing = [
+            s
+            for s in probe_syms
+            if not _quote_has_daily_activity(quotes_by_symbol.get(_norm_kis_stock_symbol(s)))
+            and dict(quotes_by_symbol.get(_norm_kis_stock_symbol(s)) or {}).get("no_trade") is not True
+        ] if quote_enrichment_mode == "top_by_group" else []
+        if activity_missing:
+            print(f"[quality] retrying incomplete daily quote rows: {len(activity_missing)}")
+            retry_quotes, _, _ = _fetch_quote_enrichment_concurrent(
+                client,
+                activity_missing,
+                fetch_investor_per_symbol=False,
+                max_workers=ew,
+                fetch_program=False,
+                trading_date=target_trading_date if use_daily_session_api else None,
+                use_daily_quote=use_daily_session_api,
+                log_label="[quote-quality-retry]",
+            )
+            quotes_by_symbol.update(retry_quotes)
+
+        expected_quote_symbols = probe_syms if quote_enrichment_mode == "top_by_group" else quote_symbols
+        market_data_quality = _require_recommendation_market_data(quotes_by_symbol, expected_quote_symbols)
+        print(
+            "[quality] recommendation market data valid: "
+            f"price={market_data_quality['priced_count']}/{market_data_quality['expected_count']} "
+            f"daily_activity={market_data_quality['active_count']}/"
+            f"{market_data_quality['expected_count'] - market_data_quality['no_trade_count']}"
+        )
+    else:
+        market_data_quality = {
+            "valid": False,
+            "reason": "quote enrichment disabled",
+            "expected_count": 0,
+            "priced_count": 0,
+            "active_count": 0,
+            "no_trade_count": 0,
+            "quote_coverage_ratio": 0.0,
+            "traded_coverage_ratio": 0.0,
+        }
 
     t_rows = time.perf_counter()
     major_rows = _build_rows(
@@ -3235,11 +3411,13 @@ def main() -> None:
         from scripts.collect_sector_data import _now_kst_iso
 
         collected_at = _now_kst_iso()
-    today_yyyy_mm_dd = _resolve_latest_common_trading_date(
-        client,
-        collected_at,
-        quotes_by_symbol,
-    )
+    resolved_from_rows = _resolve_latest_common_trading_date(client, collected_at, quotes_by_symbol)
+    if resolved_from_rows != target_trading_date:
+        raise RuntimeError(
+            "trading date changed during collection: "
+            f"started={target_trading_date} resolved={resolved_from_rows}"
+        )
+    today_yyyy_mm_dd = target_trading_date
     print(
         f"[theme-history] snapshot trading date={today_yyyy_mm_dd} "
         f"(collected_at={collected_at})"
@@ -3431,6 +3609,8 @@ def main() -> None:
         "theme_snapshot_date": today_yyyy_mm_dd,
         "theme_history_report_days": max(1, int(args.history_report_days)),
         "market_up_ratio": _round1((market_up_ratio or 0.0) * 100.0) if market_up_ratio is not None else None,
+        "recommendation_data_valid": bool(market_data_quality.get("valid")),
+        "market_data_quality": market_data_quality,
     }
 
     # The report must retain dates where no group cleared the strict `주도`

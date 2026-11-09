@@ -33,6 +33,56 @@ def test_official_institution_field_is_parsed_and_zero_is_valid(monkeypatch):
     assert calls == ["/uapi/domestic-stock/v1/quotations/inquire-investor"]
 
 
+def test_dated_investor_uses_only_requested_trading_date(monkeypatch):
+    client = KISClient()
+    def get(path, params, tr_id):
+        assert path.endswith("investor-trade-by-stock-daily")
+        assert params["FID_INPUT_DATE_1"] == "20261109"
+        assert tr_id == "FHPTJ04160001"
+        return {"output2": [
+            {"stck_bsop_date": "20261110", "frgn_ntby_tr_pbmn": "999", "orgn_ntby_tr_pbmn": "999"},
+            {"stck_bsop_date": "20261109", "frgn_ntby_tr_pbmn": "1200", "orgn_ntby_tr_pbmn": "-800"},
+        ]}
+    monkeypatch.setattr(client, "_get", get)
+    result = client.fetch_foreign_institution_for_symbol("005930", trading_date="2026-11-09")
+    assert result["trading_date"] == "2026-11-09"
+    assert result["foreign_net_tr_pbmn"] == 1200
+    assert result["institution_net_tr_pbmn"] == -800
+
+
+def test_daily_quote_selects_exact_session_and_computes_return():
+    class Auth:
+        def get_daily_ohlcv(self, symbol, start, end, market_div_code="J"):
+            return {"output2": [
+                {"stck_bsop_date": "20261106", "stck_oprc": "90", "stck_hgpr": "101", "stck_lwpr": "89", "stck_clpr": "100", "acml_vol": "10", "acml_tr_pbmn": "950"},
+                {"stck_bsop_date": "20261109", "stck_oprc": "101", "stck_hgpr": "112", "stck_lwpr": "100", "stck_clpr": "110", "acml_vol": "20", "acml_tr_pbmn": "2100"},
+            ]}
+    result = KISClient(auth=Auth()).fetch_stock_daily_quote("005930", "2026-11-09")
+    assert result["close"] == 110
+    assert result["previous_close"] == 100
+    assert result["return_pct"] == pytest.approx(0.1)
+    assert result["value_traded"] == 2100
+    assert result["trading_date"] == "2026-11-09"
+
+
+def test_dated_program_flow_uses_official_daily_endpoint(monkeypatch):
+    client = KISClient()
+    def get(path, params, tr_id):
+        assert path.endswith("program-trade-by-stock-daily")
+        assert params["FID_INPUT_DATE_1"] == "20261109"
+        assert tr_id == "FHPPG04650201"
+        return {"output": [
+            {"stck_bsop_date": "20261109", "whol_smtn_ntby_tr_pbmn": "3456"},
+        ]}
+    monkeypatch.setattr(client, "_get", get)
+    result = client.fetch_program_trade_net_for_symbol("005930", trading_date="2026-11-09")
+    assert result == {
+        "program_net_tr_pbmn": 3456,
+        "symbol": "005930",
+        "trading_date": "2026-11-09",
+    }
+
+
 def test_coverage_requires_both_foreign_and_institution_values():
     assert _missing_investor_symbols(["005930"], {"005930": {
         "foreign_net_tr_pbmn": 0, "institution_net_tr_pbmn": None}}) == ["005930"]

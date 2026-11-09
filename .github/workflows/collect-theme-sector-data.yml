@@ -1,4 +1,4 @@
-# Theme(테마) 대/중분류 섹터 리포트: 평일 KST 20:30 (UTC 11:30) + 수동 실행
+# Theme(테마) 대/중분류 섹터 리포트: 평일 장후 + 다음 날 새벽 재시도 + 수동 실행
 # - collect_thema_sector_data 가 기본으로 GitHub theme-sector-* 릴리즈에서 theme_history 를 동기화한 뒤 수집한다.
 # - 수집 후 theme-sector- 태그로 릴리즈한다.
 name: Collect theme sector data
@@ -12,6 +12,7 @@ on:
   schedule:
     - cron: "30 11 * * 1-5" # KST 20:30
     - cron: "30 12 * * 1-5" # KST 21:30 retry when the first run failed
+    - cron: "30 20 * * 1-5" # KST Tue-Sat 05:30, previous trading-session retry
 
 permissions:
   contents: write
@@ -41,19 +42,40 @@ jobs:
         run: |
           python -m pip install -r requirements.txt
 
-      - name: Compute release tag and decide whether collection is needed
+      - name: Resolve latest common trading date
+        id: session
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: |
+          python -m scripts.resolve_latest_trading_date --github-output "$GITHUB_OUTPUT"
+
+      - name: Compute trading-date release tag and validate existing release
         id: rel
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="theme-sector-$(date +%Y%m%d)"
+          trading_date="${{ steps.session.outputs.trading_date }}"
+          tag="theme-sector-${{ steps.session.outputs.trading_date_compact }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          should_run=true
+
           if [ "${{ github.event_name }}" = "schedule" ] && gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "A validated release already exists for today: $tag"
-          else
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            asset_dir="${RUNNER_TEMP}/theme-release-check"
+            mkdir -p "$asset_dir"
+            if gh release download "$tag" --repo "${{ github.repository }}" --dir "$asset_dir" \
+              --pattern overview.json \
+              --pattern theme_history_index.json \
+              --pattern theme_history_snapshot.json && \
+              python -m scripts.validate_theme_sector_release \
+                --dir "$asset_dir" --trading-date "$trading_date" --tag "$tag"; then
+              should_run=false
+              echo "Validated trading-date release already exists: $tag"
+            else
+              echo "Existing release is incomplete or mismatched; recollecting: $tag"
+            fi
           fi
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
 
       - name: Collect theme sector data
         if: steps.rel.outputs.should_run == 'true'
@@ -69,7 +91,7 @@ jobs:
           python -m scripts.collect_thema_sector_data \
             --theme-history-sync-max-releases 5 \
             --enrichment-workers 6 \
-            --investor-policy auto \
+            --investor-policy required \
             --strict-completeness \
             --telegram
 

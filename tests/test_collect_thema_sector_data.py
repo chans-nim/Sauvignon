@@ -32,11 +32,60 @@ from scripts.collect_thema_sector_data import (
     _score_group_members,
     _select_quote_symbols,
     _render_theme_report_html,
+    _market_data_quality,
+    _require_recommendation_market_data,
     _resolve_latest_common_trading_date,
     _resolve_classification_json,
     _validate_classification_data,
     _write_theme_history_snapshot,
 )
+
+
+def test_market_data_quality_rejects_premarket_zero_activity() -> None:
+    import pytest
+
+    quotes = {
+        "005930": {"price": 189900, "return_pct": 0.0, "value_traded": 0.0, "volume": 0.0},
+        "000660": {"price": 1136000, "return_pct": 0.0, "value_traded": 0.0, "volume": 0.0},
+    }
+    quality = _market_data_quality(quotes, ["005930", "000660"])
+    assert quality["quote_coverage_ratio"] == 1.0
+    assert quality["traded_coverage_ratio"] == 0.0
+    assert quality["valid"] is False
+    with pytest.raises(RuntimeError, match="refusing to rank themes"):
+        _require_recommendation_market_data(quotes, ["005930", "000660"])
+
+
+def test_market_data_quality_accepts_zero_return_with_real_trading() -> None:
+    quotes = {
+        "005930": {"price": 189900, "return_pct": 0.0, "value_traded": 100_000_000, "volume": 1000},
+        "000660": {"price": 1136000, "return_pct": -0.01, "value_traded": 200_000_000, "volume": 2000},
+    }
+    quality = _require_recommendation_market_data(quotes, ["005930", "000660"])
+    assert quality["valid"] is True
+    assert quality["traded_coverage_ratio"] == 1.0
+
+
+def test_breadth_is_unavailable_without_market_returns() -> None:
+    result = calculate_breadth_score(
+        member_count=10,
+        rs60_ratio=1.0,
+        rs70_ratio=1.0,
+        up_ratio=0.0,
+        market_up_ratio=None,
+        value_expansion_ratio=None,
+    )
+    assert result["breadth_score"] is None
+
+
+def test_market_data_quality_excludes_explicit_no_trade_rows() -> None:
+    quotes = {
+        "005930": {"price": 189900, "return_pct": 0.0, "value_traded": 100_000_000, "volume": 1000},
+        "000660": {"price": 1136000, "return_pct": 0.0, "value_traded": 0.0, "volume": 0.0, "no_trade": True},
+    }
+    quality = _require_recommendation_market_data(quotes, ["005930", "000660"])
+    assert quality["valid"] is True
+    assert quality["no_trade_count"] == 1
 from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
 
 

@@ -1,5 +1,5 @@
 """
-수집 산출물을 `theme-sector-YYYYMMDD-HHMM` 태그로 GitHub Release에 올린다.
+수집 산출물을 거래일 기준 `theme-sector-YYYYMMDD` 태그로 GitHub Release에 올린다.
 
 첨부:
   - theme_history_snapshot.json (히스토리 디렉터리의 기존/당일 스냅샷을 주도 테마만 통합)
@@ -8,7 +8,7 @@
   - theme_major_middle_stock_classification_dup_allowed.json (있을 때)
 
 예:
-  GH_TOKEN=... python -m scripts.publish_theme_sector_release --repo owner/Sauvignon --tag theme-sector-20260507-1605
+  GH_TOKEN=... python -m scripts.publish_theme_sector_release --repo owner/Sauvignon --tag theme-sector-20260507
 """
 from __future__ import annotations
 
@@ -265,7 +265,7 @@ def gh_release_upload(repo: str, tag: str, files: list[Path]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create GitHub release for theme sector collect outputs")
     parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "").strip() or None, help="owner/repo")
-    parser.add_argument("--tag", required=True, help=f"Release tag, e.g. {THEME_SECTOR_TAG_PREFIX}20260507-1605")
+    parser.add_argument("--tag", required=True, help=f"Trading-date release tag, e.g. {THEME_SECTOR_TAG_PREFIX}20260507")
     parser.add_argument("--theme-history-dir", type=Path, default=Path("data/theme_history"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/lake/sector/thema_major_middle"))
     parser.add_argument(
@@ -294,6 +294,11 @@ def main() -> None:
     snap_date = (args.snapshot_date or meta.get("theme_snapshot_date") or "").strip()
     if not snap_date:
         raise SystemExit("could not resolve snapshot date; pass --snapshot-date YYYY-MM-DD")
+    expected_tag = f"{THEME_SECTOR_TAG_PREFIX}{_date_yyyymmdd(snap_date)}"
+    if args.tag != expected_tag:
+        raise SystemExit(
+            f"release tag must match snapshot trading date: expected={expected_tag} actual={args.tag}"
+        )
 
     history_dir = Path(args.theme_history_dir)
     classification_json = Path(args.classification_json)

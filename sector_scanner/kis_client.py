@@ -91,6 +91,16 @@ def _coerce_output_list(payload: dict[str, Any], *keys: str) -> list[dict[str, A
     return []
 
 
+def _row_trading_date(row: dict[str, Any]) -> str | None:
+    """Return an ISO trading date when a KIS row contains one."""
+    u = _upper_map(row)
+    raw = _pick(u, "STCK_BSOP_DATE", "BSOP_DATE", "STCK_DATE", "DATE", "XYMD")
+    digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if len(digits) == 8:
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:]}"
+    return None
+
+
 def _norm_stock_quote(out0: dict[str, Any]) -> dict[str, Any]:
     u = _upper_map(out0)
     price = _pick(u, "STCK_PRPR", "PRPR", "STCK_CLPR")
@@ -660,7 +670,9 @@ class KISClient:
             logger.warning("foreign-institution-total: %s", e)
             return []
 
-    def fetch_foreign_institution_for_symbol(self, symbol: str) -> dict[str, Any]:
+    def fetch_foreign_institution_for_symbol(
+        self, symbol: str, *, trading_date: str | None = None
+    ) -> dict[str, Any]:
         """
         종목별 외국인/기관 순매수(거래대금 우선, 없으면 수량) 조회.
 
@@ -671,6 +683,45 @@ class KISClient:
         if not sym:
             return {}
         try:
+            # After midnight the current-investor endpoint can move to a new,
+            # empty business day.  The dated daily endpoint keeps the completed
+            # session addressable and is therefore the primary overnight path.
+            if trading_date:
+                date_digits = "".join(ch for ch in str(trading_date) if ch.isdigit())
+                daily_body = self._get(
+                    "/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily",
+                    {
+                        "FID_COND_MRKT_DIV_CODE": self._market_div,
+                        "FID_INPUT_ISCD": sym,
+                        "FID_INPUT_DATE_1": date_digits,
+                        "FID_ORG_ADJ_PRC": "0",
+                        "FID_ETC_CLS_CODE": "",
+                    },
+                    "FHPTJ04160001",
+                )
+                daily_rows = _coerce_output_list(daily_body, "output2", "output", "output1")
+                wanted = str(trading_date)[:10]
+                matched = [r for r in daily_rows if _row_trading_date(r) == wanted]
+                if matched:
+                    iu = _upper_map(matched[0])
+                    fnv = _pick(iu, "FRGN_NTBY_TR_PBMN") or _pick_by_key_fragments(iu, ("FRGN", "NTBY", "PBMN"))
+                    insv = (
+                        _pick(iu, "ORGN_NTBY_TR_PBMN", "ORGNT_NTBY_TR_PBMN", "INST_NTBY_TR_PBMN")
+                        or _pick_by_key_fragments(iu, ("ORG", "NTBY", "PBMN"))
+                        or _pick_by_key_fragments(iu, ("INST", "NTBY", "PBMN"))
+                    )
+                    fn_pbmn = _maybe_scale_tr_pbmn_to_won(_to_float(fnv) if fnv is not None else None)
+                    ins_pbmn = _maybe_scale_tr_pbmn_to_won(_to_float(insv) if insv is not None else None)
+                    if fn_pbmn is not None or ins_pbmn is not None:
+                        return {
+                            "symbol": sym,
+                            "trading_date": wanted,
+                            "foreign_net_tr_pbmn": fn_pbmn,
+                            "institution_net_tr_pbmn": ins_pbmn,
+                            "foreign_net_strength": min(1.0, max(-1.0, float(fn_pbmn or 0.0) / 5e10)),
+                            "institution_net_strength": min(1.0, max(-1.0, float(ins_pbmn or 0.0) / 5e10)),
+                        }
+
             # 1) 기본시세/주식현재가 투자자 (공식 샘플 경로)
             investor_body = self._get(
                 "/uapi/domestic-stock/v1/quotations/inquire-investor",
@@ -758,7 +809,9 @@ class KISClient:
             logger.warning("foreign-institution-by-symbol %s: %s", sym, e)
             return {}
 
-    def fetch_program_trade_net_for_symbol(self, symbol: str) -> dict[str, Any]:
+    def fetch_program_trade_net_for_symbol(
+        self, symbol: str, *, trading_date: str | None = None
+    ) -> dict[str, Any]:
         """
         당일 종목 프로그램매매 순매수 거래대금(원 단위 근사) — 순위표에 없을 때 종목별 조회 보강.
 
@@ -769,21 +822,40 @@ class KISClient:
         if not sym:
             return {}
         try:
-            body = self._get(
-                ep.URL_PROGRAM_TRADE_BY_STOCK,
-                {
-                    "fid_cond_mrkt_div_code": self._market_div,
-                    "fid_input_iscd": sym,
-                    "custtype": "P",
-                },
-                ep.TR_PROGRAM_TRADE_BY_STOCK,
-            )
+            if trading_date:
+                body = self._get(
+                    "/uapi/domestic-stock/v1/quotations/program-trade-by-stock-daily",
+                    {
+                        "FID_COND_MRKT_DIV_CODE": self._market_div,
+                        "FID_INPUT_ISCD": sym,
+                        "FID_INPUT_DATE_1": "".join(ch for ch in str(trading_date) if ch.isdigit()),
+                    },
+                    "FHPPG04650201",
+                )
+            else:
+                body = self._get(
+                    ep.URL_PROGRAM_TRADE_BY_STOCK,
+                    {
+                        "fid_cond_mrkt_div_code": self._market_div,
+                        "fid_input_iscd": sym,
+                        "custtype": "P",
+                    },
+                    ep.TR_PROGRAM_TRADE_BY_STOCK,
+                )
             # 이 API는 output(list) 로 내려오는 케이스가 흔함.
             bar_rows = _coerce_output_list(body, "output2", "output", "output1")
 
             net_pbmn = 0.0
-            if bar_rows:
-                u = _upper_map(bar_rows[-1])
+            selected_rows = bar_rows
+            if trading_date:
+                wanted = str(trading_date)[:10]
+                selected_rows = [r for r in bar_rows if _row_trading_date(r) == wanted]
+                # Never substitute another day's program flow for the requested
+                # session.  Missing dated data must stay visible to validation.
+                if not selected_rows:
+                    return {}
+            if selected_rows:
+                u = _upper_map(selected_rows[-1])
                 net_pbmn = _to_float(
                     _pick(u, "WHOL_SMTN_NTBY_TR_PBMN", "NTBY_TR_PBMN", "SMTN_NTBY_TR_PBMN", "PRDY_NTBY_TR_PBMN")
                 )
@@ -791,9 +863,12 @@ class KISClient:
                     any_ntby = _pick_by_key_fragments(u, ("NTBY", "PBMN"), ("ICDC",))
                     if any_ntby is not None:
                         net_pbmn = _to_float(any_ntby)
-            if net_pbmn == 0.0 and not bar_rows:
+            if net_pbmn == 0.0 and not selected_rows:
                 return {}
-            return {"program_net_tr_pbmn": net_pbmn, "symbol": sym}
+            result = {"program_net_tr_pbmn": net_pbmn, "symbol": sym}
+            if trading_date:
+                result["trading_date"] = str(trading_date)[:10]
+            return result
         except Exception as e:
             logger.warning("program-trade-by-stock %s: %s", sym, e, exc_info=True)
             return {}
@@ -879,6 +954,43 @@ class KISClient:
         wide = pd.concat(series_list, axis=1)
         wide = wide.sort_index()
         return wide.tail(max(10, int(days)))
+
+    def fetch_stock_daily_quote(self, symbol: str, trading_date: str) -> dict[str, Any]:
+        """Fetch immutable OHLCV for one completed session, including prior close."""
+        sym = str(symbol).strip()
+        sym = sym.zfill(6) if sym.isdigit() else sym
+        wanted = pd.Timestamp(str(trading_date)[:10]).normalize()
+        start = (wanted - pd.Timedelta(days=14)).date().isoformat()
+        end = wanted.date().isoformat()
+        raw = self._kis.get_daily_ohlcv(sym, start, end, market_div_code="J")
+        from src.collect.base_collect import normalize_ohlcv
+
+        df = normalize_ohlcv(sym, "KOSPI", raw).sort_values("date")
+        df = df[df["date"] <= wanted]
+        exact = df[df["date"] == wanted]
+        if exact.empty:
+            return {}
+        row = exact.iloc[-1]
+        earlier = df[df["date"] < wanted]
+        prev = float(earlier.iloc[-1]["close"]) if not earlier.empty else 0.0
+        close = float(row["close"])
+        volume = float(row["volume"])
+        value = float(row["value"])
+        return {
+            "symbol": sym,
+            "price": close,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": close,
+            "previous_close": prev,
+            "return_pct": ((close / prev) - 1.0) if prev > 0 else 0.0,
+            "volume": volume,
+            "value_traded": value,
+            "no_trade": close > 0 and volume == 0 and value == 0,
+            "trading_date": wanted.date().isoformat(),
+            "data_source": "inquire-daily-itemchartprice",
+        }
 
     def stream_ticks(self, symbols: list[str]) -> Iterator[dict[str, Any]]:
         if symbols:
