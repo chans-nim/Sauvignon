@@ -30,7 +30,7 @@ jobs:
       TZ: Asia/Seoul
       # The preflight trading-date resolver and collector run as separate
       # processes. Reuse one runner-local token to avoid KIS reissue limits.
-      KIS_TOKEN_CACHE_FILE: ${{ runner.temp }}/kis-token-cache.json
+      KIS_TOKEN_CACHE_FILE: /tmp/sauvignon-kis-token-cache.json
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
