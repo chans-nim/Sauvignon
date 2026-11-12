@@ -3141,6 +3141,7 @@ def main() -> None:
         f"({snap_disk['min_file_date'] or '-'} ~ {snap_disk['max_file_date'] or '-'})"
     )
 
+    print("[startup] resolving classification data", flush=True)
     source_path = _resolve_classification_json(Path(args.classification_json))
     if not source_path.is_file():
         raise SystemExit(
@@ -3152,8 +3153,17 @@ def main() -> None:
 
     data = _load_classification_json(source_path)
     major_blueprints, middle_blueprints = _build_group_blueprints(data)
+    print(
+        f"[startup] classification loaded: major={len(major_blueprints)} middle={len(middle_blueprints)}",
+        flush=True,
+    )
     client = build_kis_client_for_mode(args.mode)
-    client.authenticate()
+    print("[startup] authenticating KIS (runner token cache enabled when configured)", flush=True)
+    try:
+        client.authenticate()
+    except Exception as exc:
+        raise RuntimeError(f"KIS authentication failed before market-data collection: {exc}") from exc
+    print("[startup] KIS authentication ready", flush=True)
     from scripts.collect_sector_data import _now_kst_iso
 
     run_collected_at = _now_kst_iso()

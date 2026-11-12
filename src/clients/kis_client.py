@@ -1,7 +1,11 @@
 from __future__ import annotations
+import json
+import hashlib
+import os
 import time
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional
 import requests
 from src.common.settings import settings
@@ -28,12 +32,66 @@ class KISClient:
         self._last_issue_ts: float = 0.0
         self._lock = threading.Lock()
 
+    def _token_cache_path(self) -> Path | None:
+        raw = str(os.getenv("KIS_TOKEN_CACHE_FILE") or "").strip()
+        return Path(raw) if raw else None
+
+    def _app_key_fingerprint(self) -> str:
+        return hashlib.sha256(self.config.app_key.encode("utf-8")).hexdigest()
+
+    def _load_cached_token(self, now: float) -> str | None:
+        path = self._token_cache_path()
+        if path is None or not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            token = str(data.get("access_token") or "").strip()
+            expires_at = float(data.get("expires_at") or 0.0)
+            # Bind the cache to the configured app key without storing the key.
+            fingerprint = str(data.get("app_key_fingerprint") or "")
+            if token and now < expires_at and fingerprint == self._app_key_fingerprint():
+                self._token = token
+                self._token_expire_ts = expires_at
+                return token
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+        return None
+
+    def _save_cached_token(self, token: str, expires_at: float) -> None:
+        path = self._token_cache_path()
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(path.suffix + ".tmp")
+            temp.write_text(
+                json.dumps(
+                    {
+                        "access_token": token,
+                        "expires_at": expires_at,
+                        "app_key_fingerprint": self._app_key_fingerprint(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            try:
+                os.chmod(temp, 0o600)
+            except OSError:
+                pass
+            temp.replace(path)
+        except OSError:
+            # Cache failure must not prevent a valid in-memory token from use.
+            return
+
     def issue_token(self) -> str:
         with self._lock:
             # 이미 유효한 토큰이 있으면 그대로 사용
             now = time.time()
             if self._token and now < self._token_expire_ts:
                 return self._token
+            cached = self._load_cached_token(now)
+            if cached:
+                return cached
             # 토큰 발급 호출 빈도 제한 (대략 1분당 1회 수준으로 조절)
             if self._last_issue_ts:
                 elapsed = now - self._last_issue_ts
@@ -55,6 +113,7 @@ class KISClient:
             self._token = token
             self._token_expire_ts = time.time() + max(60, expires_in - 60)
             self._last_issue_ts = time.time()
+            self._save_cached_token(token, self._token_expire_ts)
             return token
 
     def get_token(self) -> str:
