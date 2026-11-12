@@ -1496,7 +1496,10 @@ def _investor_collection_enabled(policy: str, now: _dt.datetime | None = None) -
     if policy == "omit":
         return False
     if policy == "required":
-        _require_investor_after_close(now)
+        # ``required`` also supports overnight/pre-market collection through
+        # the dated investor-trade-by-stock-daily endpoint.  The target
+        # trading date is resolved after authentication, so wall-clock time
+        # alone must not reject the run here.
         return True
     if policy != "auto":
         raise ValueError(f"Unknown investor policy: {policy}")
@@ -3162,15 +3165,25 @@ def main() -> None:
         f"collection date={run_kst_date} daily_api={use_daily_session_api}"
     )
     t_live = time.perf_counter()
-    live_signal_map = _build_live_signal_map(client)
+    # Intraday ranking endpoints roll to the new business day overnight and
+    # can be empty or zeroed before open.  Completed-session daily quotes are
+    # the authoritative ranking input in historical mode.
+    live_signal_map = {} if use_daily_session_api else _build_live_signal_map(client)
     print(f"[timing] live_signal_map  {time.perf_counter() - t_live:.2f}s")
 
     investor_by_symbol: dict[str, dict[str, Any]] = {}
     t_fi = time.perf_counter()
     try:
-        fi_rows = client.fetch_foreign_institution_flow() if investor_enabled else []
+        # The rank endpoint has no requested-date contract.  Never let a stale
+        # or reset overnight response satisfy historical-session coverage;
+        # all selected symbols will use the dated per-symbol fallback below.
+        fi_rows = (
+            client.fetch_foreign_institution_flow()
+            if investor_enabled and not use_daily_session_api
+            else []
+        )
         investor_by_symbol = _build_investor_by_symbol(fi_rows)
-        if investor_enabled and len(fi_rows) == 0:
+        if investor_enabled and not use_daily_session_api and len(fi_rows) == 0:
             print(
                 "WARNING: fetch_foreign_institution_flow returned empty rows "
                 "(check KIS mode/장 운영/자격증명; 순위 무응답 시 수급 열은 비게 됩니다).",

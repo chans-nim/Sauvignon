@@ -107,8 +107,8 @@ def test_auto_omits_intraday_investor_but_requires_after_close():
     assert not _investor_collection_enabled("auto", intraday)
     assert _investor_collection_enabled("auto", close)
     assert not _investor_collection_enabled("omit", close)
-    with pytest.raises(RuntimeError):
-        _investor_collection_enabled("required", intraday)
+    # required can collect the latest completed session through the dated API.
+    assert _investor_collection_enabled("required", intraday)
 
 
 def test_omitted_flow_preserves_quote_program_and_missing_values():
