@@ -86,6 +86,27 @@ def test_market_data_quality_excludes_explicit_no_trade_rows() -> None:
     quality = _require_recommendation_market_data(quotes, ["005930", "000660"])
     assert quality["valid"] is True
     assert quality["no_trade_count"] == 1
+
+
+def test_market_data_quality_rejects_mass_premarket_no_trade_flags() -> None:
+    import pytest
+
+    symbols = [f"{i:06d}" for i in range(100)]
+    quotes = {
+        symbol: {
+            "price": 100,
+            "return_pct": 0.0,
+            "value_traded": 0.0,
+            "volume": 0.0,
+            "no_trade": True,
+        }
+        for symbol in symbols
+    }
+    quality = _market_data_quality(quotes, symbols)
+    assert quality["no_trade_ratio"] == 1.0
+    assert quality["valid"] is False
+    with pytest.raises(RuntimeError, match="no_trade=100/100"):
+        _require_recommendation_market_data(quotes, symbols)
 from scripts.sync_theme_history_from_github_releases import expand_combined_snapshot_to_daily_files, write_daily_snapshot_from_overview
 
 

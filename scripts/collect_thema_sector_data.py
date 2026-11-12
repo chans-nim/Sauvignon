@@ -39,6 +39,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 if __name__ == "__main__" and str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -103,6 +105,7 @@ STOCK_RS_W_NEAR_HIGH = 0.05
 # zero trading values turn percentile ranks into artificial RS 67/85 clusters.
 MARKET_DATA_MIN_QUOTE_COVERAGE = 0.95
 MARKET_DATA_MIN_TRADED_COVERAGE = 0.80
+MARKET_DATA_MAX_NO_TRADE_RATIO = 0.20
 
 
 def _repo_classification_json() -> Path:
@@ -187,10 +190,12 @@ def _market_data_quality(
     active = [s for s in required_traded if _quote_has_daily_activity(quotes_by_symbol.get(s))]
     quote_coverage = len(priced) / expected_count if expected_count else 0.0
     traded_coverage = len(active) / len(required_traded) if required_traded else 0.0
+    no_trade_ratio = len(no_trade) / expected_count if expected_count else 1.0
     valid = (
         expected_count > 0
         and quote_coverage >= MARKET_DATA_MIN_QUOTE_COVERAGE
         and traded_coverage >= MARKET_DATA_MIN_TRADED_COVERAGE
+        and (expected_count < 20 or no_trade_ratio <= MARKET_DATA_MAX_NO_TRADE_RATIO)
     )
     priced_set = set(priced)
     active_set = set(active)
@@ -200,6 +205,7 @@ def _market_data_quality(
         "priced_count": len(priced),
         "active_count": len(active),
         "no_trade_count": len(no_trade),
+        "no_trade_ratio": round(no_trade_ratio, 4),
         "quote_coverage_ratio": round(quote_coverage, 4),
         "traded_coverage_ratio": round(traded_coverage, 4),
         "missing_price_symbols": [s for s in expected if s not in priced_set],
@@ -221,6 +227,8 @@ def _require_recommendation_market_data(
         f"daily_activity={quality['active_count']}/"
         f"{quality['expected_count'] - quality['no_trade_count']} "
         f"({quality['traded_coverage_ratio']:.1%}); "
+        f"no_trade={quality['no_trade_count']}/{quality['expected_count']} "
+        f"({quality['no_trade_ratio']:.1%}); "
         f"missing_price_sample={quality['missing_price_symbols'][:10]} "
         f"missing_activity_sample={quality['missing_activity_symbols'][:10]}. "
         "Run after the market data is finalized or check KIS quote fields/credentials."
@@ -259,14 +267,29 @@ def _resolve_latest_common_trading_date(
         for q in (quotes_by_symbol or {}).values()
         if isinstance(q, dict) and str(q.get("trading_date") or q.get("trade_date") or "").strip()
     }
-    explicit_dates = {d for d in explicit_dates if _parse_iso_date(d)}
+    try:
+        collected_dt = _dt.datetime.fromisoformat(str(collected_at).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError(f"cannot resolve snapshot trading date from {collected_at!r}") from exc
+    kst = ZoneInfo("Asia/Seoul")
+    collected_dt = collected_dt.astimezone(kst) if collected_dt.tzinfo else collected_dt.replace(tzinfo=kst)
+    completed_cutoff = (
+        collected_dt.date()
+        if collected_dt.time() >= _dt.time(20, 0)
+        else collected_dt.date() - _dt.timedelta(days=1)
+    )
+    explicit_dates = {
+        d for d in explicit_dates
+        if _parse_iso_date(d) and _dt.date.fromisoformat(d[:10]) <= completed_cutoff
+    }
     if len(explicit_dates) == 1:
         return next(iter(explicit_dates))[:10]
 
     try:
         frame = client.fetch_price_history_frame(list(anchor_symbols), days=14)
         if frame is not None and not bool(getattr(frame, "empty", True)):
-            common = frame.dropna(axis=0, how="any")
+            eligible = frame[pd.to_datetime(frame.index).date <= completed_cutoff]
+            common = eligible.dropna(axis=0, how="any")
             if not bool(getattr(common, "empty", True)):
                 latest = common.index.max()
                 if hasattr(latest, "date"):
@@ -280,11 +303,7 @@ def _resolve_latest_common_trading_date(
     # A weekday run after the regular close can safely use its KST date.  For
     # pre-market, after-midnight, weekend, or holiday runs, refusing to persist
     # is safer than creating a snapshot under a non-trading date.
-    try:
-        collected_dt = _dt.datetime.fromisoformat(str(collected_at).replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise RuntimeError(f"cannot resolve snapshot trading date from {collected_at!r}") from exc
-    if collected_dt.weekday() < 5 and (collected_dt.hour, collected_dt.minute) >= (15, 30):
+    if collected_dt.weekday() < 5 and collected_dt.time() >= _dt.time(20, 0):
         return collected_dt.date().isoformat()
     raise RuntimeError(
         "latest common trading date is unavailable; refusing to save a snapshot "

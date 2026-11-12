@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -21,6 +23,21 @@ def test_resolver_uses_latest_date_shared_by_all_anchors():
             )
 
     assert resolve_latest_trading_date(Client()) == "2026-11-09"
+
+
+def test_resolver_excludes_premarket_reference_row_for_today():
+    class Client:
+        def fetch_price_history_frame(self, symbols, days=14):
+            return pd.DataFrame(
+                {symbol: [100, 100] for symbol in symbols},
+                index=pd.to_datetime(["2026-11-12", "2026-11-13"]),
+            )
+
+    result = resolve_latest_trading_date(
+        Client(),
+        now=datetime(2026, 11, 13, 5, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+    )
+    assert result == "2026-11-12"
 
 
 def test_existing_release_requires_matching_date_tag_and_quality(tmp_path):
