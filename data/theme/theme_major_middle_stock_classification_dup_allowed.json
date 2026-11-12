@@ -2,15 +2,15 @@
   "schema_version": "2.1",
   "description": "복수 테마 허용 분류. stock_to_sectors가 정본이며 major_categories는 호환용 파생 데이터.",
   "duplicate_sector_allowed": true,
-  "extracted_stock_count": 2573,
-  "unique_stock_count": 2565,
+  "extracted_stock_count": 2539,
+  "unique_stock_count": 2531,
   "actual_multi_sector_stock_count_in_source": 8,
   "major_category_count": 15,
   "middle_category_count": 56,
   "major_categories": [
     {
       "majorCategory": "2차전지",
-      "count": 111,
+      "count": 110,
       "subCategories": [
         {
           "middleCategory": "배터리셀",
@@ -1219,7 +1219,7 @@
         },
         {
           "middleCategory": "전지장비",
-          "count": 42,
+          "count": 41,
           "stocks": [
             {
               "stockCode": "137400",
@@ -1885,23 +1885,6 @@
               ]
             },
             {
-              "stockCode": "196490",
-              "stockName": "디에이테크놀로지",
-              "marketCap": 362,
-              "rs": 25,
-              "per1": null,
-              "per2": -4.14,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "2차전지",
-                  "middleCategory": "전지장비"
-                }
-              ]
-            },
-            {
               "stockCode": "148930",
               "stockName": "에이치와이티씨",
               "marketCap": 318,
@@ -1941,11 +1924,11 @@
     },
     {
       "majorCategory": "IT/플랫폼",
-      "count": 349,
+      "count": 344,
       "subCategories": [
         {
           "middleCategory": "SW/AI",
-          "count": 218,
+          "count": 215,
           "stocks": [
             {
               "stockCode": "035420",
@@ -2067,23 +2050,6 @@
               "per3": 23.53,
               "per4": 15.31,
               "per5": 9.52,
-              "sectors": [
-                {
-                  "majorCategory": "IT/플랫폼",
-                  "middleCategory": "SW/AI"
-                }
-              ]
-            },
-            {
-              "stockCode": "012510",
-              "stockName": "더존비즈온",
-              "marketCap": 36291,
-              "rs": 78,
-              "per1": 29.19,
-              "per2": 40.71,
-              "per3": 33.23,
-              "per4": 29.89,
-              "per5": null,
               "sectors": [
                 {
                   "majorCategory": "IT/플랫폼",
@@ -5475,23 +5441,6 @@
               ]
             },
             {
-              "stockCode": "139050",
-              "stockName": "BF랩스",
-              "marketCap": 242,
-              "rs": 25,
-              "per1": null,
-              "per2": -9.54,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "IT/플랫폼",
-                  "middleCategory": "SW/AI"
-                }
-              ]
-            },
-            {
               "stockCode": "291810",
               "stockName": "핀텔",
               "marketCap": 236,
@@ -5583,23 +5532,6 @@
               "rs": 74,
               "per1": null,
               "per2": -15.11,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "IT/플랫폼",
-                  "middleCategory": "SW/AI"
-                }
-              ]
-            },
-            {
-              "stockCode": "028080",
-              "stockName": "휴맥스홀딩스",
-              "marketCap": 189,
-              "rs": 3,
-              "per1": null,
-              "per2": -0.13,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -6300,7 +6232,7 @@
         },
         {
           "middleCategory": "인터넷/플랫폼",
-          "count": 93,
+          "count": 91,
           "stocks": [
             {
               "stockCode": "035420",
@@ -6506,23 +6438,6 @@
               "per2": -31.01,
               "per3": 14.55,
               "per4": 9.87,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "IT/플랫폼",
-                  "middleCategory": "인터넷/플랫폼"
-                }
-              ]
-            },
-            {
-              "stockCode": "230360",
-              "stockName": "에코마케팅",
-              "marketCap": 4963,
-              "rs": 69,
-              "per1": 20.13,
-              "per2": 30.44,
-              "per3": null,
-              "per4": null,
               "per5": null,
               "sectors": [
                 {
@@ -7824,23 +7739,6 @@
               ]
             },
             {
-              "stockCode": "084180",
-              "stockName": "수성웹툰",
-              "marketCap": 215,
-              "rs": 0,
-              "per1": null,
-              "per2": -0.54,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "IT/플랫폼",
-                  "middleCategory": "인터넷/플랫폼"
-                }
-              ]
-            },
-            {
               "stockCode": "134060",
               "stockName": "이퓨쳐",
               "marketCap": 203,
@@ -7920,7 +7818,7 @@
     },
     {
       "majorCategory": "K-컬처",
-      "count": 138,
+      "count": 136,
       "subCategories": [
         {
           "middleCategory": "미용기기",
@@ -8032,7 +7930,7 @@
         },
         {
           "middleCategory": "엔터/미디어",
-          "count": 65,
+          "count": 64,
           "stocks": [
             {
               "stockCode": "352820",
@@ -8613,23 +8511,6 @@
               ]
             },
             {
-              "stockCode": "299900",
-              "stockName": "위지윅스튜디오",
-              "marketCap": 773,
-              "rs": 1,
-              "per1": null,
-              "per2": -2.19,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "K-컬처",
-                  "middleCategory": "엔터/미디어"
-                }
-              ]
-            },
-            {
               "stockCode": "036000",
               "stockName": "예림당",
               "marketCap": 749,
@@ -9143,7 +9024,7 @@
         },
         {
           "middleCategory": "화장품",
-          "count": 67,
+          "count": 66,
           "stocks": [
             {
               "stockCode": "090430",
@@ -9945,23 +9826,6 @@
               ]
             },
             {
-              "stockCode": "082660",
-              "stockName": "코스나인",
-              "marketCap": 478,
-              "rs": 25,
-              "per1": null,
-              "per2": -2.27,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "K-컬처",
-                  "middleCategory": "화장품"
-                }
-              ]
-            },
-            {
               "stockCode": "101240",
               "stockName": "씨큐브",
               "marketCap": 466,
@@ -10290,11 +10154,11 @@
     },
     {
       "majorCategory": "금융",
-      "count": 117,
+      "count": 114,
       "subCategories": [
         {
           "middleCategory": "리츠/부동산",
-          "count": 35,
+          "count": 33,
           "stocks": [
             {
               "stockCode": "088980",
@@ -10856,46 +10720,12 @@
                   "middleCategory": "리츠/부동산"
                 }
               ]
-            },
-            {
-              "stockCode": "204210",
-              "stockName": "스타에스엠리츠",
-              "marketCap": 159,
-              "rs": 25,
-              "per1": null,
-              "per2": -4.05,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "금융",
-                  "middleCategory": "리츠/부동산"
-                }
-              ]
-            },
-            {
-              "stockCode": "140910",
-              "stockName": "에이리츠",
-              "marketCap": 140,
-              "rs": 25,
-              "per1": null,
-              "per2": -25.77,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "금융",
-                  "middleCategory": "리츠/부동산"
-                }
-              ]
             }
           ]
         },
         {
           "middleCategory": "보험",
-          "count": 16,
+          "count": 15,
           "stocks": [
             {
               "stockCode": "032830",
@@ -11042,23 +10872,6 @@
               "per2": 7.44,
               "per3": 6.29,
               "per4": 6.1,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "금융",
-                  "middleCategory": "보험"
-                }
-              ]
-            },
-            {
-              "stockCode": "082640",
-              "stockName": "동양생명",
-              "marketCap": 13667,
-              "rs": 74,
-              "per1": 8.52,
-              "per2": 10.99,
-              "per3": 4.44,
-              "per4": 4.12,
               "per5": null,
               "sectors": [
                 {
@@ -12327,7 +12140,7 @@
     },
     {
       "majorCategory": "기계",
-      "count": 140,
+      "count": 139,
       "subCategories": [
         {
           "middleCategory": "로봇/자동화",
@@ -13102,7 +12915,7 @@
         },
         {
           "middleCategory": "산업기계",
-          "count": 95,
+          "count": 94,
           "stocks": [
             {
               "stockCode": "034020",
@@ -14639,23 +14452,6 @@
               ]
             },
             {
-              "stockCode": "005110",
-              "stockName": "한창",
-              "marketCap": 265,
-              "rs": 25,
-              "per1": 0.41,
-              "per2": 0.39,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "기계",
-                  "middleCategory": "산업기계"
-                }
-              ]
-            },
-            {
               "stockCode": "043360",
               "stockName": "디지아이",
               "marketCap": 242,
@@ -14729,7 +14525,7 @@
     },
     {
       "majorCategory": "바이오",
-      "count": 350,
+      "count": 349,
       "subCategories": [
         {
           "middleCategory": "CRO/CDMO",
@@ -16819,7 +16615,7 @@
         },
         {
           "middleCategory": "의료기기",
-          "count": 121,
+          "count": 120,
           "stocks": [
             {
               "stockCode": "214370",
@@ -18794,23 +18590,6 @@
               ]
             },
             {
-              "stockCode": "032980",
-              "stockName": "바이온",
-              "marketCap": 184,
-              "rs": 25,
-              "per1": null,
-              "per2": -2.26,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "바이오",
-                  "middleCategory": "의료기기"
-                }
-              ]
-            },
-            {
               "stockCode": "241820",
               "stockName": "피씨엘",
               "marketCap": 168,
@@ -20709,7 +20488,7 @@
     },
     {
       "majorCategory": "반도체",
-      "count": 238,
+      "count": 235,
       "subCategories": [
         {
           "middleCategory": "메모리",
@@ -21783,7 +21562,7 @@
         },
         {
           "middleCategory": "반도체장비",
-          "count": 92,
+          "count": 90,
           "stocks": [
             {
               "stockCode": "042700",
@@ -22823,23 +22602,6 @@
               ]
             },
             {
-              "stockCode": "269620",
-              "stockName": "시스웍",
-              "marketCap": 1321,
-              "rs": 25,
-              "per1": null,
-              "per2": -25.4,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "반도체",
-                  "middleCategory": "반도체장비"
-                }
-              ]
-            },
-            {
               "stockCode": "081180",
               "stockName": "쎄크",
               "marketCap": 1281,
@@ -23067,23 +22829,6 @@
               "rs": 29,
               "per1": null,
               "per2": -17.23,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "반도체",
-                  "middleCategory": "반도체장비"
-                }
-              ]
-            },
-            {
-              "stockCode": "222160",
-              "stockName": "NPX",
-              "marketCap": 796,
-              "rs": 25,
-              "per1": null,
-              "per2": -5.06,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -23353,7 +23098,7 @@
         },
         {
           "middleCategory": "비메모리/팹리스",
-          "count": 57,
+          "count": 56,
           "stocks": [
             {
               "stockCode": "005930",
@@ -24108,23 +23853,6 @@
               ]
             },
             {
-              "stockCode": "096610",
-              "stockName": "알에프세미",
-              "marketCap": 516,
-              "rs": 25,
-              "per1": 30.21,
-              "per2": 30.26,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "반도체",
-                  "middleCategory": "비메모리/팹리스"
-                }
-              ]
-            },
-            {
               "stockCode": "080520",
               "stockName": "오디텍",
               "marketCap": 491,
@@ -24811,11 +24539,11 @@
     },
     {
       "majorCategory": "방산",
-      "count": 41,
+      "count": 40,
       "subCategories": [
         {
           "middleCategory": "방위산업",
-          "count": 24,
+          "count": 23,
           "stocks": [
             {
               "stockCode": "012450",
@@ -25215,23 +24943,6 @@
                   "middleCategory": "방위산업"
                 }
               ]
-            },
-            {
-              "stockCode": "230980",
-              "stockName": "비유테크놀러지",
-              "marketCap": 214,
-              "rs": 25,
-              "per1": null,
-              "per2": -20.82,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "방산",
-                  "middleCategory": "방위산업"
-                }
-              ]
             }
           ]
         },
@@ -25542,7 +25253,7 @@
     },
     {
       "majorCategory": "소비재",
-      "count": 288,
+      "count": 281,
       "subCategories": [
         {
           "middleCategory": "여행/레저",
@@ -26147,7 +25858,7 @@
         },
         {
           "middleCategory": "유통",
-          "count": 53,
+          "count": 50,
           "stocks": [
             {
               "stockCode": "021240",
@@ -26294,23 +26005,6 @@
               "per2": 24.13,
               "per3": 19.83,
               "per4": 17.27,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "유통"
-                }
-              ]
-            },
-            {
-              "stockCode": "057050",
-              "stockName": "현대홈쇼핑",
-              "marketCap": 9576,
-              "rs": 79,
-              "per1": 6.67,
-              "per2": 9.67,
-              "per3": 6.37,
-              "per4": 5.74,
               "per5": null,
               "sectors": [
                 {
@@ -26677,23 +26371,6 @@
               ]
             },
             {
-              "stockCode": "203690",
-              "stockName": "아크솔루션스",
-              "marketCap": 892,
-              "rs": 25,
-              "per1": null,
-              "per2": -6.31,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "유통"
-                }
-              ]
-            },
-            {
               "stockCode": "004590",
               "stockName": "한국가구",
               "marketCap": 789,
@@ -27032,29 +26709,12 @@
                   "middleCategory": "유통"
                 }
               ]
-            },
-            {
-              "stockCode": "043090",
-              "stockName": "더테크놀로지",
-              "marketCap": 47,
-              "rs": 22,
-              "per1": null,
-              "per2": -0.33,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "유통"
-                }
-              ]
             }
           ]
         },
         {
           "middleCategory": "음식료",
-          "count": 107,
+          "count": 104,
           "stocks": [
             {
               "stockCode": "033780",
@@ -27592,23 +27252,6 @@
               "per2": 12.61,
               "per3": 7.39,
               "per4": 6.05,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "음식료"
-                }
-              ]
-            },
-            {
-              "stockCode": "031440",
-              "stockName": "신세계푸드",
-              "marketCap": 1967,
-              "rs": 66,
-              "per1": 2.4,
-              "per2": 2.55,
-              "per3": null,
-              "per4": null,
               "per5": null,
               "sectors": [
                 {
@@ -28706,23 +28349,6 @@
               ]
             },
             {
-              "stockCode": "217620",
-              "stockName": "선샤인푸드",
-              "marketCap": 268,
-              "rs": 25,
-              "per1": null,
-              "per2": -1.41,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "음식료"
-                }
-              ]
-            },
-            {
               "stockCode": "154030",
               "stockName": "아시아종묘",
               "marketCap": 254,
@@ -28857,29 +28483,12 @@
                   "middleCategory": "음식료"
                 }
               ]
-            },
-            {
-              "stockCode": "227100",
-              "stockName": "프로브잇",
-              "marketCap": 148,
-              "rs": 25,
-              "per1": null,
-              "per2": -0.29,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "음식료"
-                }
-              ]
             }
           ]
         },
         {
           "middleCategory": "패션/의류",
-          "count": 92,
+          "count": 91,
           "stocks": [
             {
               "stockCode": "111770",
@@ -30367,23 +29976,6 @@
               "rs": 1,
               "per1": null,
               "per2": -0.48,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "소비재",
-                  "middleCategory": "패션/의류"
-                }
-              ]
-            },
-            {
-              "stockCode": "008290",
-              "stockName": "원풍물산",
-              "marketCap": 170,
-              "rs": 18,
-              "per1": null,
-              "per2": -7.38,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -33689,7 +33281,7 @@
     },
     {
       "majorCategory": "자동차",
-      "count": 179,
+      "count": 174,
       "subCategories": [
         {
           "middleCategory": "완성차",
@@ -33818,7 +33410,7 @@
         },
         {
           "middleCategory": "자동차부품",
-          "count": 168,
+          "count": 163,
           "stocks": [
             {
               "stockCode": "012330",
@@ -34541,23 +34133,6 @@
               "rs": 64,
               "per1": 3.82,
               "per2": 4.09,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "자동차",
-                  "middleCategory": "자동차부품"
-                }
-              ]
-            },
-            {
-              "stockCode": "046070",
-              "stockName": "코다코",
-              "marketCap": 1592,
-              "rs": 25,
-              "per1": null,
-              "per2": -24.48,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -36082,23 +35657,6 @@
               ]
             },
             {
-              "stockCode": "005030",
-              "stockName": "부산주공",
-              "marketCap": 451,
-              "rs": 25,
-              "per1": 22.27,
-              "per2": -4.13,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "자동차",
-                  "middleCategory": "자동차부품"
-                }
-              ]
-            },
-            {
               "stockCode": "290120",
               "stockName": "DH오토리드",
               "marketCap": 445,
@@ -36575,23 +36133,6 @@
               ]
             },
             {
-              "stockCode": "008500",
-              "stockName": "일정실업",
-              "marketCap": 176,
-              "rs": 48,
-              "per1": 1.12,
-              "per2": 1.48,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "자동차",
-                  "middleCategory": "자동차부품"
-                }
-              ]
-            },
-            {
               "stockCode": "012340",
               "stockName": "뉴인텍",
               "marketCap": 162,
@@ -36626,46 +36167,12 @@
               ]
             },
             {
-              "stockCode": "106520",
-              "stockName": "노블엠앤비",
-              "marketCap": 159,
-              "rs": 25,
-              "per1": null,
-              "per2": -20.55,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "자동차",
-                  "middleCategory": "자동차부품"
-                }
-              ]
-            },
-            {
               "stockCode": "145210",
               "stockName": "다이나믹디자인",
               "marketCap": 95,
               "rs": 0,
               "per1": null,
               "per2": -0.96,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "자동차",
-                  "middleCategory": "자동차부품"
-                }
-              ]
-            },
-            {
-              "stockCode": "101390",
-              "stockName": "아이엠",
-              "marketCap": 67,
-              "rs": 12,
-              "per1": null,
-              "per2": -0.53,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -38331,7 +37838,7 @@
     },
     {
       "majorCategory": "조선/해운",
-      "count": 41,
+      "count": 40,
       "subCategories": [
         {
           "middleCategory": "조선",
@@ -38426,7 +37933,7 @@
         },
         {
           "middleCategory": "조선기자재",
-          "count": 25,
+          "count": 24,
           "stocks": [
             {
               "stockCode": "443060",
@@ -38826,23 +38333,6 @@
               "rs": 25,
               "per1": 14.64,
               "per2": -0.56,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "조선/해운",
-                  "middleCategory": "조선기자재"
-                }
-              ]
-            },
-            {
-              "stockCode": "060240",
-              "stockName": "스타코링크",
-              "marketCap": 115,
-              "rs": 18,
-              "per1": null,
-              "per2": -0.68,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -40054,11 +39544,11 @@
     },
     {
       "majorCategory": "화학/소재",
-      "count": 245,
+      "count": 241,
       "subCategories": [
         {
           "middleCategory": "정유/화학",
-          "count": 162,
+          "count": 158,
           "stocks": [
             {
               "stockCode": "051910",
@@ -40473,23 +39963,6 @@
               ]
             },
             {
-              "stockCode": "006380",
-              "stockName": "카프로",
-              "marketCap": 6185,
-              "rs": 25,
-              "per1": null,
-              "per2": -0.93,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "화학/소재",
-                  "middleCategory": "정유/화학"
-                }
-              ]
-            },
-            {
               "stockCode": "014830",
               "stockName": "유니드",
               "marketCap": 5935,
@@ -40499,23 +39972,6 @@
               "per3": 6.83,
               "per4": 5.93,
               "per5": 5.27,
-              "sectors": [
-                {
-                  "majorCategory": "화학/소재",
-                  "middleCategory": "정유/화학"
-                }
-              ]
-            },
-            {
-              "stockCode": "138490",
-              "stockName": "코오롱ENP",
-              "marketCap": 5700,
-              "rs": 91,
-              "per1": 7.68,
-              "per2": 13.72,
-              "per3": null,
-              "per4": null,
-              "per5": null,
               "sectors": [
                 {
                   "majorCategory": "화학/소재",
@@ -42783,40 +42239,6 @@
                   "middleCategory": "정유/화학"
                 }
               ]
-            },
-            {
-              "stockCode": "121850",
-              "stockName": "코이즈",
-              "marketCap": 154,
-              "rs": 0,
-              "per1": null,
-              "per2": -0.92,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "화학/소재",
-                  "middleCategory": "정유/화학"
-                }
-              ]
-            },
-            {
-              "stockCode": "152550",
-              "stockName": "한국ANKOR유전",
-              "marketCap": 137,
-              "rs": 6,
-              "per1": null,
-              "per2": null,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "화학/소재",
-                  "middleCategory": "정유/화학"
-                }
-              ]
             }
           ]
         },
@@ -44357,23 +43779,6 @@
         {
           "majorCategory": "방산",
           "middleCategory": "우주항공"
-        }
-      ]
-    },
-    {
-      "stockCode": "139050",
-      "stockName": "BF랩스",
-      "marketCap": 242,
-      "rs": 25,
-      "per1": null,
-      "per2": -9.54,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "IT/플랫폼",
-          "middleCategory": "SW/AI"
         }
       ]
     },
@@ -47684,23 +47089,6 @@
         {
           "majorCategory": "화학/소재",
           "middleCategory": "정유/화학"
-        }
-      ]
-    },
-    {
-      "stockCode": "222160",
-      "stockName": "NPX",
-      "marketCap": 796,
-      "rs": 25,
-      "per1": null,
-      "per2": -5.06,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "반도체",
-          "middleCategory": "반도체장비"
         }
       ]
     },
@@ -51615,23 +51003,6 @@
       ]
     },
     {
-      "stockCode": "106520",
-      "stockName": "노블엠앤비",
-      "marketCap": 159,
-      "rs": 25,
-      "per1": null,
-      "per2": -20.55,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "자동차",
-          "middleCategory": "자동차부품"
-        }
-      ]
-    },
-    {
       "stockCode": "376930",
       "stockName": "노을",
       "marketCap": 892,
@@ -53502,23 +52873,6 @@
       ]
     },
     {
-      "stockCode": "012510",
-      "stockName": "더존비즈온",
-      "marketCap": 36291,
-      "rs": 78,
-      "per1": 29.19,
-      "per2": 40.71,
-      "per3": 33.23,
-      "per4": 29.89,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "IT/플랫폼",
-          "middleCategory": "SW/AI"
-        }
-      ]
-    },
-    {
       "stockCode": "462860",
       "stockName": "더즌",
       "marketCap": 2798,
@@ -53549,23 +52903,6 @@
         {
           "majorCategory": "반도체",
           "middleCategory": "반도체장비"
-        }
-      ]
-    },
-    {
-      "stockCode": "043090",
-      "stockName": "더테크놀로지",
-      "marketCap": 47,
-      "rs": 22,
-      "per1": null,
-      "per2": -0.33,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "유통"
         }
       ]
     },
@@ -54297,23 +53634,6 @@
         {
           "majorCategory": "인프라",
           "middleCategory": "유틸리티"
-        }
-      ]
-    },
-    {
-      "stockCode": "082640",
-      "stockName": "동양생명",
-      "marketCap": 13667,
-      "rs": 74,
-      "per1": 8.52,
-      "per2": 10.99,
-      "per3": 4.44,
-      "per4": 4.12,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "금융",
-          "middleCategory": "보험"
         }
       ]
     },
@@ -55151,23 +54471,6 @@
         {
           "majorCategory": "바이오",
           "middleCategory": "의료기기"
-        }
-      ]
-    },
-    {
-      "stockCode": "196490",
-      "stockName": "디에이테크놀로지",
-      "marketCap": 362,
-      "rs": 25,
-      "per1": null,
-      "per2": -4.14,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "2차전지",
-          "middleCategory": "전지장비"
         }
       ]
     },
@@ -58368,23 +57671,6 @@
       ]
     },
     {
-      "stockCode": "032980",
-      "stockName": "바이온",
-      "marketCap": 184,
-      "rs": 25,
-      "per1": null,
-      "per2": -2.26,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "바이오",
-          "middleCategory": "의료기기"
-        }
-      ]
-    },
-    {
       "stockCode": "308080",
       "stockName": "바이젠셀",
       "marketCap": 1162,
@@ -58912,23 +58198,6 @@
       ]
     },
     {
-      "stockCode": "005030",
-      "stockName": "부산주공",
-      "marketCap": 451,
-      "rs": 25,
-      "per1": 22.27,
-      "per2": -4.13,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "자동차",
-          "middleCategory": "자동차부품"
-        }
-      ]
-    },
-    {
       "stockCode": "008470",
       "stockName": "부스타",
       "marketCap": 337,
@@ -59435,23 +58704,6 @@
         {
           "majorCategory": "기계",
           "middleCategory": "산업기계"
-        }
-      ]
-    },
-    {
-      "stockCode": "230980",
-      "stockName": "비유테크놀러지",
-      "marketCap": 214,
-      "rs": 25,
-      "per1": null,
-      "per2": -20.82,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "방산",
-          "middleCategory": "방위산업"
         }
       ]
     },
@@ -61908,23 +61160,6 @@
       ]
     },
     {
-      "stockCode": "217620",
-      "stockName": "선샤인푸드",
-      "marketCap": 268,
-      "rs": 25,
-      "per1": null,
-      "per2": -1.41,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "음식료"
-        }
-      ]
-    },
-    {
       "stockCode": "171090",
       "stockName": "선익시스템",
       "marketCap": 9830,
@@ -63234,23 +62469,6 @@
       ]
     },
     {
-      "stockCode": "084180",
-      "stockName": "수성웹툰",
-      "marketCap": 215,
-      "rs": 0,
-      "per1": null,
-      "per2": -0.54,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "IT/플랫폼",
-          "middleCategory": "인터넷/플랫폼"
-        }
-      ]
-    },
-    {
       "stockCode": "253840",
       "stockName": "수젠텍",
       "marketCap": 1132,
@@ -63417,40 +62635,6 @@
         {
           "majorCategory": "IT/플랫폼",
           "middleCategory": "SW/AI"
-        }
-      ]
-    },
-    {
-      "stockCode": "204210",
-      "stockName": "스타에스엠리츠",
-      "marketCap": 159,
-      "rs": 25,
-      "per1": null,
-      "per2": -4.05,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "금융",
-          "middleCategory": "리츠/부동산"
-        }
-      ]
-    },
-    {
-      "stockCode": "060240",
-      "stockName": "스타코링크",
-      "marketCap": 115,
-      "rs": 18,
-      "per1": null,
-      "per2": -0.68,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "조선/해운",
-          "middleCategory": "조선기자재"
         }
       ]
     },
@@ -63740,23 +62924,6 @@
         {
           "majorCategory": "IT/플랫폼",
           "middleCategory": "SW/AI"
-        }
-      ]
-    },
-    {
-      "stockCode": "269620",
-      "stockName": "시스웍",
-      "marketCap": 1321,
-      "rs": 25,
-      "per1": null,
-      "per2": -25.4,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "반도체",
-          "middleCategory": "반도체장비"
         }
       ]
     },
@@ -64063,23 +63230,6 @@
         {
           "majorCategory": "K-컬처",
           "middleCategory": "화장품"
-        }
-      ]
-    },
-    {
-      "stockCode": "031440",
-      "stockName": "신세계푸드",
-      "marketCap": 1967,
-      "rs": 66,
-      "per1": 2.4,
-      "per2": 2.55,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "음식료"
         }
       ]
     },
@@ -66090,23 +65240,6 @@
       ]
     },
     {
-      "stockCode": "101390",
-      "stockName": "아이엠",
-      "marketCap": 67,
-      "rs": 12,
-      "per1": null,
-      "per2": -0.53,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "자동차",
-          "middleCategory": "자동차부품"
-        }
-      ]
-    },
-    {
       "stockCode": "493280",
       "stockName": "아이엠바이오로직스",
       "marketCap": 8600,
@@ -66566,23 +65699,6 @@
       ]
     },
     {
-      "stockCode": "203690",
-      "stockName": "아크솔루션스",
-      "marketCap": 892,
-      "rs": 25,
-      "per1": null,
-      "per2": -6.31,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "유통"
-        }
-      ]
-    },
-    {
       "stockCode": "158430",
       "stockName": "아톤",
       "marketCap": 2157,
@@ -66800,23 +65916,6 @@
         {
           "majorCategory": "기계",
           "middleCategory": "로봇/자동화"
-        }
-      ]
-    },
-    {
-      "stockCode": "096610",
-      "stockName": "알에프세미",
-      "marketCap": 516,
-      "rs": 25,
-      "per1": 30.21,
-      "per2": 30.26,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "반도체",
-          "middleCategory": "비메모리/팹리스"
         }
       ]
     },
@@ -68317,23 +67416,6 @@
       ]
     },
     {
-      "stockCode": "140910",
-      "stockName": "에이리츠",
-      "marketCap": 140,
-      "rs": 25,
-      "per1": null,
-      "per2": -25.77,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "금융",
-          "middleCategory": "리츠/부동산"
-        }
-      ]
-    },
-    {
       "stockCode": "078520",
       "stockName": "에이블씨엔씨",
       "marketCap": 3330,
@@ -68959,23 +68041,6 @@
         {
           "majorCategory": "K-컬처",
           "middleCategory": "화장품"
-        }
-      ]
-    },
-    {
-      "stockCode": "230360",
-      "stockName": "에코마케팅",
-      "marketCap": 4963,
-      "rs": 69,
-      "per1": 20.13,
-      "per2": 30.44,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "IT/플랫폼",
-          "middleCategory": "인터넷/플랫폼"
         }
       ]
     },
@@ -72265,23 +71330,6 @@
       ]
     },
     {
-      "stockCode": "008290",
-      "stockName": "원풍물산",
-      "marketCap": 170,
-      "rs": 18,
-      "per1": null,
-      "per2": -7.38,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "패션/의류"
-        }
-      ]
-    },
-    {
       "stockCode": "101160",
       "stockName": "월덱스",
       "marketCap": 5275,
@@ -72618,23 +71666,6 @@
         {
           "majorCategory": "소비재",
           "middleCategory": "유통"
-        }
-      ]
-    },
-    {
-      "stockCode": "299900",
-      "stockName": "위지윅스튜디오",
-      "marketCap": 773,
-      "rs": 1,
-      "per1": null,
-      "per2": -2.19,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "K-컬처",
-          "middleCategory": "엔터/미디어"
         }
       ]
     },
@@ -75410,23 +74441,6 @@
       ]
     },
     {
-      "stockCode": "008500",
-      "stockName": "일정실업",
-      "marketCap": 176,
-      "rs": 48,
-      "per1": 1.12,
-      "per2": 1.48,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "자동차",
-          "middleCategory": "자동차부품"
-        }
-      ]
-    },
-    {
       "stockCode": "019540",
       "stockName": "일지테크",
       "marketCap": 1049,
@@ -78032,23 +77046,6 @@
       ]
     },
     {
-      "stockCode": "006380",
-      "stockName": "카프로",
-      "marketCap": 6185,
-      "rs": 25,
-      "per1": null,
-      "per2": -0.93,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "화학/소재",
-          "middleCategory": "정유/화학"
-        }
-      ]
-    },
-    {
       "stockCode": "313760",
       "stockName": "캐리",
       "marketCap": 52,
@@ -79001,23 +77998,6 @@
       ]
     },
     {
-      "stockCode": "046070",
-      "stockName": "코다코",
-      "marketCap": 1592,
-      "rs": 25,
-      "per1": null,
-      "per2": -24.48,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "자동차",
-          "middleCategory": "자동차부품"
-        }
-      ]
-    },
-    {
       "stockCode": "047770",
       "stockName": "코데즈컴바인",
       "marketCap": 1941,
@@ -79290,23 +78270,6 @@
       ]
     },
     {
-      "stockCode": "082660",
-      "stockName": "코스나인",
-      "marketCap": 478,
-      "rs": 25,
-      "per1": null,
-      "per2": -2.27,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "K-컬처",
-          "middleCategory": "화장품"
-        }
-      ]
-    },
-    {
       "stockCode": "192820",
       "stockName": "코스맥스",
       "marketCap": 24231,
@@ -79528,23 +78491,6 @@
       ]
     },
     {
-      "stockCode": "138490",
-      "stockName": "코오롱ENP",
-      "marketCap": 5700,
-      "rs": 91,
-      "per1": 7.68,
-      "per2": 13.72,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "화학/소재",
-          "middleCategory": "정유/화학"
-        }
-      ]
-    },
-    {
       "stockCode": "003070",
       "stockName": "코오롱글로벌",
       "marketCap": 3076,
@@ -79660,23 +78606,6 @@
         {
           "majorCategory": "2차전지",
           "middleCategory": "전지장비"
-        }
-      ]
-    },
-    {
-      "stockCode": "121850",
-      "stockName": "코이즈",
-      "marketCap": 154,
-      "rs": 0,
-      "per1": null,
-      "per2": -0.92,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "화학/소재",
-          "middleCategory": "정유/화학"
         }
       ]
     },
@@ -83013,23 +81942,6 @@
       ]
     },
     {
-      "stockCode": "227100",
-      "stockName": "프로브잇",
-      "marketCap": 148,
-      "rs": 25,
-      "per1": null,
-      "per2": -0.29,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "음식료"
-        }
-      ]
-    },
-    {
       "stockCode": "321260",
       "stockName": "프로이천",
       "marketCap": 854,
@@ -84148,23 +83060,6 @@
         {
           "majorCategory": "인프라",
           "middleCategory": "건자재"
-        }
-      ]
-    },
-    {
-      "stockCode": "152550",
-      "stockName": "한국ANKOR유전",
-      "marketCap": 137,
-      "rs": 6,
-      "per1": null,
-      "per2": null,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "화학/소재",
-          "middleCategory": "정유/화학"
         }
       ]
     },
@@ -85920,23 +84815,6 @@
       ]
     },
     {
-      "stockCode": "005110",
-      "stockName": "한창",
-      "marketCap": 265,
-      "rs": 25,
-      "per1": 0.41,
-      "per2": 0.39,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "기계",
-          "middleCategory": "산업기계"
-        }
-      ]
-    },
-    {
       "stockCode": "079170",
       "stockName": "한창산업",
       "marketCap": 354,
@@ -86944,23 +85822,6 @@
       ]
     },
     {
-      "stockCode": "057050",
-      "stockName": "현대홈쇼핑",
-      "marketCap": 9576,
-      "rs": 79,
-      "per1": 6.67,
-      "per2": 9.67,
-      "per3": 6.37,
-      "per4": 5.74,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "소비재",
-          "middleCategory": "유통"
-        }
-      ]
-    },
-    {
       "stockCode": "460930",
       "stockName": "현대힘스",
       "marketCap": 6925,
@@ -87590,23 +86451,6 @@
       ]
     },
     {
-      "stockCode": "028080",
-      "stockName": "휴맥스홀딩스",
-      "marketCap": 189,
-      "rs": 3,
-      "per1": null,
-      "per2": -0.13,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "IT/플랫폼",
-          "middleCategory": "SW/AI"
-        }
-      ]
-    },
-    {
       "stockCode": "175140",
       "stockName": "휴먼테크놀로지",
       "marketCap": 1020,
@@ -87879,7 +86723,7 @@
       ]
     }
   ],
-  "classification_as_of": "2026-10-23",
+  "classification_as_of": "2026-11-13",
   "classification_method": "공식 사업영역 기반 주분류 + 집중형 ETF 합의로 교차검증한 복수 테마; 광범위 ETF와 단순 수혜주는 제외",
   "classification_notes": [
     "CRO와 CDMO, 반도체 테스트 서비스와 인터페이스 부품은 각각 포괄 중분류로 명시",
@@ -87892,5 +86736,50 @@
     "상장사 공식 홈페이지/IR 및 KRX KIND 공시",
     "ETF 운용사 공식 구성종목 및 집중형 ETF 간 합의",
     "한국거래소 종목코드와 수집 시세 응답 교차검증"
-  ]
+  ],
+  "listing_validation": {
+    "as_of": "2026-11-13",
+    "source": "KIS official KOSPI/KOSDAQ/KONEX master files",
+    "source_urls": [
+      "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip",
+      "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip",
+      "https://new.real.download.dws.co.kr/common/master/konex_code.mst.zip"
+    ],
+    "removed_unlisted_codes": [
+      "005030",
+      "005110",
+      "006380",
+      "008290",
+      "008500",
+      "012510",
+      "028080",
+      "031440",
+      "032980",
+      "043090",
+      "046070",
+      "057050",
+      "060240",
+      "082640",
+      "082660",
+      "084180",
+      "096610",
+      "101390",
+      "106520",
+      "121850",
+      "138490",
+      "139050",
+      "140910",
+      "152550",
+      "196490",
+      "203690",
+      "204210",
+      "217620",
+      "222160",
+      "227100",
+      "230360",
+      "230980",
+      "269620",
+      "299900"
+    ]
+  }
 }

@@ -91,6 +91,7 @@ jobs:
           TELEGRAM_CHAT_ID_STOCK: ${{ secrets.TELEGRAM_CHAT_ID_STOCK }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
         run: |
+          python -m scripts.prune_delisted_theme_stocks --apply
           python -m scripts.collect_thema_sector_data \
             --theme-history-sync-max-releases 5 \
             --enrichment-workers 6 \
