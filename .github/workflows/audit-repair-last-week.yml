@@ -74,7 +74,6 @@ jobs:
   audit-repair:
     runs-on: ubuntu-latest
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       TZ: Asia/Seoul
       INPUT_DAYS: ${{ github.event.inputs.days || '7' }}
       INPUT_AUDIT_ONLY: ${{ github.event.inputs.audit_only || 'false' }}
@@ -90,7 +89,7 @@ jobs:
       INPUT_PUBLISH_TAG: ${{ github.event.inputs.publish_tag || '' }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure Git (for manifest updates)
         if: env.INPUT_AUDIT_ONLY != 'true' && env.INPUT_PUBLISH_RELEASE == 'true'
@@ -99,7 +98,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip

@@ -26,17 +26,16 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       TZ: Asia/Seoul
       # The preflight trading-date resolver and collector run as separate
       # processes. Reuse one runner-local token to avoid KIS reissue limits.
       KIS_TOKEN_CACHE_FILE: /tmp/sauvignon-kis-token-cache.json
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
