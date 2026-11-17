@@ -17,6 +17,25 @@ MASTER_URLS = {
     "KOSDAQ": "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip",
     "KONEX": "https://new.real.download.dws.co.kr/common/master/konex_code.mst.zip",
 }
+LIFECYCLE_OVERRIDES_PATH = (
+    Path(__file__).resolve().parents[1] / "src" / "master" / "lifecycle_overrides.json"
+)
+
+
+def confirmed_delisted_codes(*, as_of: dt.date, path: Path = LIFECYCLE_OVERRIDES_PATH) -> set[str]:
+    """Return reviewed delistings effective by *as_of*.
+
+    Exchange/KIS master files can retain a merged or delisted security for a
+    few days.  The reviewed lifecycle ledger closes that stale-master gap.
+    """
+    events = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        str(event.get("symbol") or "").strip().zfill(6)
+        for event in events
+        if event.get("symbol")
+        and event.get("source_url")
+        and dt.date.fromisoformat(str(event["delisting_date"])) <= as_of
+    }
 
 
 def fetch_listed_codes() -> set[str]:
@@ -109,7 +128,9 @@ def main() -> None:
     args = parser.parse_args()
 
     data = json.loads(args.classification_json.read_text(encoding="utf-8"))
-    removed = prune_unlisted(data, fetch_listed_codes(), as_of=dt.date.today().isoformat())
+    today = dt.date.today()
+    listed_codes = fetch_listed_codes() - confirmed_delisted_codes(as_of=today)
+    removed = prune_unlisted(data, listed_codes, as_of=today.isoformat())
     print(f"unlisted={len(removed)} codes={removed}")
     if args.apply and removed:
         args.classification_json.write_text(

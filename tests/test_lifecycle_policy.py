@@ -84,3 +84,12 @@ def test_hanchang_override_matches_listing_identity():
         {"symbol": "005110", "std_code": "KR7005110002", "market": "KOSDAQ", "is_active": True},
     ])
     assert apply_lifecycle_overrides(universe, as_of=date(2026, 10, 15))["is_active"].all()
+
+
+def test_ecovolt_excluded_after_absorption_merger():
+    universe = pd.DataFrame([{
+        "symbol": "097780", "std_code": "KR7097780001", "market": "KOSDAQ",
+        "is_active": True, "is_trading_halt": False,
+    }])
+    assert apply_lifecycle_overrides(universe, as_of=date(2026, 11, 11)).iloc[0]["is_active"]
+    assert not apply_lifecycle_overrides(universe, as_of=date(2026, 11, 12)).iloc[0]["is_active"]

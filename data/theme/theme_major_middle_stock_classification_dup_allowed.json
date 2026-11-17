@@ -2,8 +2,8 @@
   "schema_version": "2.1",
   "description": "복수 테마 허용 분류. stock_to_sectors가 정본이며 major_categories는 호환용 파생 데이터.",
   "duplicate_sector_allowed": true,
-  "extracted_stock_count": 2539,
-  "unique_stock_count": 2531,
+  "extracted_stock_count": 2538,
+  "unique_stock_count": 2530,
   "actual_multi_sector_stock_count_in_source": 8,
   "major_category_count": 15,
   "middle_category_count": 56,
@@ -33281,7 +33281,7 @@
     },
     {
       "majorCategory": "자동차",
-      "count": 174,
+      "count": 173,
       "subCategories": [
         {
           "middleCategory": "완성차",
@@ -33410,7 +33410,7 @@
         },
         {
           "middleCategory": "자동차부품",
-          "count": 163,
+          "count": 162,
           "stocks": [
             {
               "stockCode": "012330",
@@ -35493,23 +35493,6 @@
               "rs": 98,
               "per1": null,
               "per2": -9.57,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "자동차",
-                  "middleCategory": "자동차부품"
-                }
-              ]
-            },
-            {
-              "stockCode": "097780",
-              "stockName": "에코볼트",
-              "marketCap": 508,
-              "rs": 15,
-              "per1": null,
-              "per2": -2.97,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -68045,23 +68028,6 @@
       ]
     },
     {
-      "stockCode": "097780",
-      "stockName": "에코볼트",
-      "marketCap": 508,
-      "rs": 15,
-      "per1": null,
-      "per2": -2.97,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "자동차",
-          "middleCategory": "자동차부품"
-        }
-      ]
-    },
-    {
       "stockCode": "038870",
       "stockName": "에코심플렉스",
       "marketCap": 454,
@@ -86723,7 +86689,7 @@
       ]
     }
   ],
-  "classification_as_of": "2026-11-13",
+  "classification_as_of": "2026-11-18",
   "classification_method": "공식 사업영역 기반 주분류 + 집중형 ETF 합의로 교차검증한 복수 테마; 광범위 ETF와 단순 수혜주는 제외",
   "classification_notes": [
     "CRO와 CDMO, 반도체 테스트 서비스와 인터페이스 부품은 각각 포괄 중분류로 명시",
@@ -86738,7 +86704,7 @@
     "한국거래소 종목코드와 수집 시세 응답 교차검증"
   ],
   "listing_validation": {
-    "as_of": "2026-11-13",
+    "as_of": "2026-11-18",
     "source": "KIS official KOSPI/KOSDAQ/KONEX master files",
     "source_urls": [
       "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip",
@@ -86746,40 +86712,7 @@
       "https://new.real.download.dws.co.kr/common/master/konex_code.mst.zip"
     ],
     "removed_unlisted_codes": [
-      "005030",
-      "005110",
-      "006380",
-      "008290",
-      "008500",
-      "012510",
-      "028080",
-      "031440",
-      "032980",
-      "043090",
-      "046070",
-      "057050",
-      "060240",
-      "082640",
-      "082660",
-      "084180",
-      "096610",
-      "101390",
-      "106520",
-      "121850",
-      "138490",
-      "139050",
-      "140910",
-      "152550",
-      "196490",
-      "203690",
-      "204210",
-      "217620",
-      "222160",
-      "227100",
-      "230360",
-      "230980",
-      "269620",
-      "299900"
+      "097780"
     ]
   }
 }

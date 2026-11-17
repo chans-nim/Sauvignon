@@ -34,5 +34,14 @@
     "delisting_date": "2026-10-15",
     "source_url": "https://spn.stockplus.com/news/api/v1/disclosure_views/koscom/508367",
     "reason": "Exchange delisting notice; final liquidation trading date 2026-10-14"
+  },
+  {
+    "symbol": "097780",
+    "std_code": "KR7097780001",
+    "market": "KOSDAQ",
+    "name": "에코볼트",
+    "delisting_date": "2026-11-12",
+    "source_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261020900700",
+    "reason": "Delisted after absorption merger into RFTech; merger shares scheduled to list on 2026-11-17"
   }
 ]
