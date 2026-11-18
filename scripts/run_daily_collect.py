@@ -61,11 +61,8 @@ def write_github_output(name: str, value: object) -> None:
         f.write(f"{name}={value}\n")
 
 
-def check_last_collect_failure() -> None:
-    """
-    직전 collect_daily run_log에서 전량 실패(total > 0 and success == 0)면 워크플로 실패를 위해 exit(1).
-    KIS 키 오류/한도 등으로 수집이 하나도 안 된 상태에서 스냅샷을 덮어쓰지 않도록 한다.
-    """
+def get_last_collect_counts() -> tuple[int, int, int] | None:
+    """Return total/success/failure counts from the latest daily collection."""
     meta_store.ensure_tables()
     con = meta_store.connect()
     try:
@@ -81,8 +78,16 @@ def check_last_collect_failure() -> None:
     finally:
         con.close()
     if not row:
-        return
+        return None
     total, success, failed = int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+    return total, success, failed
+
+
+def check_last_collect_failure() -> None:
+    counts = get_last_collect_counts()
+    if counts is None:
+        return
+    total, success, _failed = counts
     if total > 0 and success == 0:
         log.error("collect_daily: all %s symbols failed; exiting so workflow does not publish stale snapshot", total)
         sys.exit(1)
@@ -143,7 +148,7 @@ def get_last_silver_date() -> date | None:
 
 def run_incremental(start: date, end: date) -> None:
     log.info("run incremental collect: %s..%s", start.isoformat(), end.isoformat())
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -153,7 +158,28 @@ def run_incremental(start: date, end: date) -> None:
             "--end-date",
             end.isoformat(),
         ],
-        check=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+
+    counts = get_last_collect_counts()
+    if counts is None:
+        raise RuntimeError(
+            f"incremental collector exited {result.returncode} without a collect_daily run log"
+        )
+    total, success, failed = counts
+    if total > 0 and success > 0 and failed > 0:
+        log.warning(
+            "incremental collection partial: success=%s failed=%s; "
+            "continuing to targeted gap fill",
+            success,
+            failed,
+        )
+        return
+    raise RuntimeError(
+        f"incremental collection failed: exit={result.returncode} "
+        f"total={total} success={success} failed={failed}"
     )
 
 

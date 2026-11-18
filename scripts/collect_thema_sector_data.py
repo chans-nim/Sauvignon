@@ -1558,6 +1558,7 @@ def _fetch_quote_enrichment_concurrent(
     workers = max(1, min(int(max_workers), 32, total))
     lock = threading.Lock()
     done_holder: list[int] = [0]
+    quote_failures: list[tuple[str, str]] = []
     t0 = time.perf_counter()
 
     def _one(sym_raw: str) -> None:
@@ -1571,8 +1572,9 @@ def _fetch_quote_enrichment_concurrent(
                     q = client.fetch_stock_price(sym)
                 if isinstance(q, dict) and q:
                     quote = q
-            except Exception:
-                pass
+            except Exception as exc:
+                with lock:
+                    quote_failures.append((sym, str(exc)))
 
         inv: dict[str, Any] = {}
         fetch_investor_for_this_symbol = fetch_investor_per_symbol and (
@@ -1631,6 +1633,12 @@ def _fetch_quote_enrichment_concurrent(
             fut.result()
 
     print(f"{log_label} done  {total} symbols  {time.perf_counter() - t0:.1f}s  (workers={workers})")
+    if quote_failures:
+        samples = [f"{sym}: {message}" for sym, message in quote_failures[:5]]
+        print(
+            f"{log_label} quote errors={len(quote_failures)} sample={samples}",
+            file=sys.stderr,
+        )
     return quotes_by_symbol, investor_out, program_by_symbol
 
 
@@ -3252,6 +3260,21 @@ def main() -> None:
             f"[timing] probe_minimal_quotes  {time.perf_counter() - t_pq:.2f}s  "
             f"ok={len(probe_quotes)}/{probe_minimal_target_n}"
         )
+        missing = sorted(set(probe_syms) - set(probe_quotes))
+        if missing:
+            print(f"[probe] retrying missing minimal quotes: {len(missing)}")
+            retry_probe_quotes, _, _ = _fetch_quote_enrichment_concurrent(
+                client,
+                missing,
+                fetch_investor_per_symbol=False,
+                max_workers=ew,
+                fetch_program=False,
+                trading_date=target_trading_date if use_daily_session_api else None,
+                use_daily_quote=use_daily_session_api,
+                log_label="[probe-quote-retry]",
+            )
+            probe_quotes.update(retry_probe_quotes)
+            print(f"[probe] after retry ok={len(probe_quotes)}/{probe_minimal_target_n}")
         if args.strict_completeness and len(probe_quotes) != probe_minimal_target_n:
             missing = sorted(set(probe_syms) - set(probe_quotes))
             raise RuntimeError(

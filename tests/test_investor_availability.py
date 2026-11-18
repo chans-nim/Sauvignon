@@ -65,6 +65,24 @@ def test_daily_quote_selects_exact_session_and_computes_return():
     assert result["trading_date"] == "2026-11-09"
 
 
+def test_daily_quote_uses_shared_request_pacing(monkeypatch):
+    class Auth:
+        def get_daily_ohlcv(self, symbol, start, end, market_div_code="J"):
+            return {"output2": [
+                {"stck_bsop_date": "20261109", "stck_oprc": "100", "stck_hgpr": "101",
+                 "stck_lwpr": "99", "stck_clpr": "100", "acml_vol": "10",
+                 "acml_tr_pbmn": "1000"},
+            ]}
+
+    client = KISClient(auth=Auth())
+    paced = []
+    monkeypatch.setattr(client, "_wait_for_request_slot", lambda: paced.append(True))
+
+    client.fetch_stock_daily_quote("005930", "2026-11-09")
+
+    assert paced == [True]
+
+
 def test_dated_program_flow_uses_official_daily_endpoint(monkeypatch):
     client = KISClient()
     def get(path, params, tr_id):

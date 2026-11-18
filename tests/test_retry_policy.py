@@ -47,6 +47,15 @@ def test_classify_network_error_as_retryable() -> None:
     assert decision.retryable is True
 
 
+@pytest.mark.parametrize("code", ["OPSQ0008", "EGW00201"])
+def test_classify_kis_business_rate_limit_as_retryable(code: str) -> None:
+    decision = classify_retryable_exception(RuntimeError(
+        f"KIS API error: {{'rt_cd': '1', 'msg_cd': '{code}', 'msg1': 'rate limited'}}"
+    ))
+    assert decision.retryable is True
+    assert decision.reason == f"kis_{code.lower()}"
+
+
 def test_run_with_retry_retries_then_succeeds() -> None:
     # 검증: retry loop는 5xx와 token refresh 케이스를 거쳐 성공 응답을 반환한다.
     calls = {"n": 0}

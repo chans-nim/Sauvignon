@@ -10,6 +10,7 @@ T = TypeVar("T")
 
 RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 TOKEN_EXPIRED_HTTP_STATUS = {401, 403}
+KIS_RETRYABLE_MESSAGE_CODES = {"OPSQ0008", "EGW00201"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,11 @@ def classify_retryable_exception(exc: Exception) -> RetryDecision:
         return RetryDecision(retryable=True, reason="network_transient")
     if isinstance(exc, requests.RequestException):
         return RetryDecision(retryable=True, reason="request_exception")
+    if isinstance(exc, RuntimeError):
+        message = str(exc)
+        code = next((item for item in KIS_RETRYABLE_MESSAGE_CODES if item in message), None)
+        if code:
+            return RetryDecision(retryable=True, reason=f"kis_{code.lower()}")
     return RetryDecision(retryable=False, reason=exc.__class__.__name__)
 
 

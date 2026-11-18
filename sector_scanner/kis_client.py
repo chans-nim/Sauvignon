@@ -276,13 +276,17 @@ class KISClient:
     def _get(self, path: str, params: dict[str, Any], tr_id: str) -> dict[str, Any]:
         # 호출 시작 시점만 min_interval 로 간격을 둔다. HTTP 대기는 락 밖에서 진행되어
         # 다중 스레드일 때 RTT 가 겹치며 전체 시간이 단축된다.
+        self._wait_for_request_slot()
+        return self._kis.request_get(path, params, tr_id)
+
+    def _wait_for_request_slot(self) -> None:
+        """Apply the same account-wide pacing to every KIS REST request path."""
         with self._throttle_lock:
             now = time.monotonic()
             gap = now - self._last_call_ts
             if gap < self._min_interval_sec:
                 time.sleep(self._min_interval_sec - gap)
             self._last_call_ts = time.monotonic()
-        return self._kis.request_get(path, params, tr_id)
 
     def authenticate(self) -> None:
         self._kis.issue_token()
@@ -962,6 +966,10 @@ class KISClient:
         wanted = pd.Timestamp(str(trading_date)[:10]).normalize()
         start = (wanted - pd.Timedelta(days=14)).date().isoformat()
         end = wanted.date().isoformat()
+        # get_daily_ohlcv talks to the auth client directly, so explicitly use
+        # the shared request-start limiter. Without this, the overnight
+        # ThreadPool probe can exceed KIS MCI limits and silently lose rows.
+        self._wait_for_request_slot()
         raw = self._kis.get_daily_ohlcv(sym, start, end, market_div_code="J")
         from src.collect.base_collect import normalize_ohlcv
 

@@ -11,7 +11,7 @@ import pytest
 
 from scripts import validate_snapshot
 from scripts.prepare_snapshot_rerelease import prepare_bundle
-from scripts.run_daily_collect import resolve_collection_target_date, run_incremental_and_gap_fill
+from scripts.run_daily_collect import resolve_collection_target_date, run_incremental, run_incremental_and_gap_fill
 from src.collect import collect_daily
 from src.collect.base_collect import fetch_ohlcv_chunked
 from src.master.universe_policy import (
@@ -128,6 +128,29 @@ def test_collect_rows_retries_only_failed_symbols(monkeypatch) -> None:
 
     assert (success, failed) == (2, 0)
     assert attempts == {"A": 2, "B": 1}
+
+
+def test_incremental_partial_failure_continues_to_gap_fill(monkeypatch) -> None:
+    class Result:
+        returncode = 1
+
+    monkeypatch.setattr("scripts.run_daily_collect.subprocess.run", lambda *_a, **_k: Result())
+    monkeypatch.setattr("scripts.run_daily_collect.get_last_collect_counts", lambda: (3789, 3733, 56))
+
+    # A partial subprocess result is recoverable by the following targeted gap fill.
+    assert run_incremental(date(2026, 11, 18), date(2026, 11, 18)) is None
+
+
+@pytest.mark.parametrize("counts", [None, (3789, 0, 3789)])
+def test_incremental_unrecoverable_failure_stops_before_gap_fill(monkeypatch, counts) -> None:
+    class Result:
+        returncode = 1
+
+    monkeypatch.setattr("scripts.run_daily_collect.subprocess.run", lambda *_a, **_k: Result())
+    monkeypatch.setattr("scripts.run_daily_collect.get_last_collect_counts", lambda: counts)
+
+    with pytest.raises(RuntimeError, match="incremental collect"):
+        run_incremental(date(2026, 11, 18), date(2026, 11, 18))
 
 
 def test_delayed_early_morning_run_targets_previous_weekday() -> None:
