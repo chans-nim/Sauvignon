@@ -7,6 +7,46 @@ import pandas as pd
 from src.storage import meta_store
 
 
+def confirmed_delisting_from_stock_info(
+    payload: dict, target_date: str, *, market: str | None = None
+) -> dict | None:
+    """Return verified listing identity when KIS reports an effective delisting.
+
+    Empty quotes, trading halts and API failures are deliberately insufficient.
+    The dated abolition field must belong to the same listing identity, and a
+    later listing date protects a newly listed security that reused a code.
+    """
+    info = payload.get("output")
+    if not isinstance(info, dict) or str(payload.get("rt_cd", "0")) not in {"0", "0000"}:
+        return None
+    std_code = str(info.get("std_pdno") or "").strip()
+    if not std_code:
+        return None
+    target = pd.Timestamp(target_date).date()
+    market_prefixes = (("KOSPI", "scts"), ("KOSDAQ", "kosdaq"))
+    if market:
+        market_prefixes = tuple(item for item in market_prefixes if item[0] == market)
+    for detected_market, prefix in market_prefixes:
+        for field in (f"{prefix}_mket_lstg_abol_dt", "lstg_abol_dt"):
+            raw = str(info.get(field) or "").strip()
+            if len(raw) != 8 or not raw.isdigit() or raw == "00000000":
+                continue
+            try:
+                effective = datetime.strptime(raw, "%Y%m%d").date()
+            except ValueError:
+                continue
+            listed = pd.to_datetime(info.get(f"{prefix}_mket_lstg_dt"), format="%Y%m%d", errors="coerce")
+            if pd.notna(listed) and listed.date() > effective:
+                continue
+            if effective <= target:
+                return {
+                    "std_code": std_code,
+                    "market": detected_market,
+                    "delisting_date": effective.isoformat(),
+                }
+    return None
+
+
 def classify_stock_status(row: dict, payload: dict, target_date: str, *, today=None) -> str | None:
     info = payload.get("output")
     if not isinstance(info, dict) or str(payload.get("rt_cd", "0")) not in {"0", "0000"}:
@@ -15,23 +55,10 @@ def classify_stock_status(row: dict, payload: dict, target_date: str, *, today=N
     isin = str(row.get("std_code") or "").strip()
     if not isin or str(info.get("std_pdno") or "").strip() != isin:
         return None
+    delisting = confirmed_delisting_from_stock_info(payload, target_date, market=row["market"])
+    if delisting and delisting["std_code"] == isin and delisting["market"] == row["market"]:
+        return "delisted"
     target = pd.Timestamp(target_date).date()
-    market_field = {"KOSPI": "scts", "KOSDAQ": "kosdaq"}.get(row["market"])
-    if market_field is None:
-        return None
-    for field in (f"{market_field}_mket_lstg_abol_dt", "lstg_abol_dt"):
-        raw = str(info.get(field) or "").strip()
-        if len(raw) != 8 or not raw.isdigit() or raw == "00000000":
-            continue
-        try:
-            effective = datetime.strptime(raw, "%Y%m%d").date()
-        except ValueError:
-            continue
-        listed = pd.to_datetime(info.get(f"{market_field}_mket_lstg_dt"), format="%Y%m%d", errors="coerce")
-        if pd.notna(listed) and listed.date() > effective:
-            continue
-        if effective <= target:
-            return "delisted"
     current = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
     if target == current and str(info.get("tr_stop_yn") or "").strip() == "Y":
         return "trading_halt"

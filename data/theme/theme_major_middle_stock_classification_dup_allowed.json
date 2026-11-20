@@ -2,8 +2,8 @@
   "schema_version": "2.1",
   "description": "복수 테마 허용 분류. stock_to_sectors가 정본이며 major_categories는 호환용 파생 데이터.",
   "duplicate_sector_allowed": true,
-  "extracted_stock_count": 2538,
-  "unique_stock_count": 2530,
+  "extracted_stock_count": 2537,
+  "unique_stock_count": 2529,
   "actual_multi_sector_stock_count_in_source": 8,
   "major_category_count": 15,
   "middle_category_count": 56,
@@ -10154,11 +10154,11 @@
     },
     {
       "majorCategory": "금융",
-      "count": 114,
+      "count": 113,
       "subCategories": [
         {
           "middleCategory": "리츠/부동산",
-          "count": 33,
+          "count": 32,
           "stocks": [
             {
               "stockCode": "088980",
@@ -10337,23 +10337,6 @@
               "rs": 34,
               "per1": 34.83,
               "per2": 71.1,
-              "per3": null,
-              "per4": null,
-              "per5": null,
-              "sectors": [
-                {
-                  "majorCategory": "금융",
-                  "middleCategory": "리츠/부동산"
-                }
-              ]
-            },
-            {
-              "stockCode": "417310",
-              "stockName": "코람코더원리츠",
-              "marketCap": 4129,
-              "rs": 75,
-              "per1": 60.31,
-              "per2": 35.12,
               "per3": null,
               "per4": null,
               "per5": null,
@@ -77998,23 +77981,6 @@
       ]
     },
     {
-      "stockCode": "417310",
-      "stockName": "코람코더원리츠",
-      "marketCap": 4129,
-      "rs": 75,
-      "per1": 60.31,
-      "per2": 35.12,
-      "per3": null,
-      "per4": null,
-      "per5": null,
-      "sectors": [
-        {
-          "majorCategory": "금융",
-          "middleCategory": "리츠/부동산"
-        }
-      ]
-    },
-    {
       "stockCode": "357120",
       "stockName": "코람코라이프인프라리츠",
       "marketCap": 4555,
@@ -86689,7 +86655,7 @@
       ]
     }
   ],
-  "classification_as_of": "2026-11-18",
+  "classification_as_of": "2026-11-21",
   "classification_method": "공식 사업영역 기반 주분류 + 집중형 ETF 합의로 교차검증한 복수 테마; 광범위 ETF와 단순 수혜주는 제외",
   "classification_notes": [
     "CRO와 CDMO, 반도체 테스트 서비스와 인터페이스 부품은 각각 포괄 중분류로 명시",
@@ -86704,7 +86670,7 @@
     "한국거래소 종목코드와 수집 시세 응답 교차검증"
   ],
   "listing_validation": {
-    "as_of": "2026-11-18",
+    "as_of": "2026-11-21",
     "source": "KIS official KOSPI/KOSDAQ/KONEX master files",
     "source_urls": [
       "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip",
@@ -86712,7 +86678,7 @@
       "https://new.real.download.dws.co.kr/common/master/konex_code.mst.zip"
     ],
     "removed_unlisted_codes": [
-      "097780"
+      "417310"
     ]
   }
 }

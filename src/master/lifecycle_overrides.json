@@ -43,5 +43,14 @@
     "delisting_date": "2026-11-12",
     "source_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261020900700",
     "reason": "Delisted after absorption merger into RFTech; merger shares scheduled to list on 2026-11-17"
+  },
+  {
+    "symbol": "417310",
+    "std_code": "KR7417310000",
+    "market": "KOSPI",
+    "name": "코람코더원리츠",
+    "delisting_date": "2026-11-20",
+    "source_url": "https://koramcothe1.com/information/public_data.do?pageIndex=1",
+    "reason": "Exchange delisting after the 2026-11-16 shareholder dissolution resolution; delisting disclosure filed 2026-11-19"
   }
 ]

@@ -90,13 +90,23 @@ jobs:
           TELEGRAM_CHAT_ID_STOCK: ${{ secrets.TELEGRAM_CHAT_ID_STOCK }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
         run: |
+          set -o pipefail
+          mkdir -p data/reports/collection
           python -m scripts.prune_delisted_theme_stocks --apply
           python -m scripts.collect_thema_sector_data \
             --theme-history-sync-max-releases 5 \
             --enrichment-workers 6 \
             --investor-policy required \
             --strict-completeness \
-            --telegram
+            --telegram 2>&1 | tee data/reports/collection/theme-sector-collection.log
+
+      - name: Preserve theme collection diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: theme-collection-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/reports/collection/*
+          if-no-files-found: ignore
 
       - name: Publish theme sector release
         if: steps.rel.outputs.should_run == 'true'

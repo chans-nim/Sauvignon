@@ -4,7 +4,11 @@ import pandas as pd
 import pytest
 
 from src.collect import collect_daily
-from src.collect.status_recovery import classify_stock_status, persist_confirmed_status
+from src.collect.status_recovery import (
+    classify_stock_status,
+    confirmed_delisting_from_stock_info,
+    persist_confirmed_status,
+)
 from src.storage import meta_store
 
 ROW = {"symbol": "005110", "std_code": "KR7005110002", "market": "KOSPI", "name": "Hanchang"}
@@ -33,6 +37,17 @@ def test_current_halt_cannot_explain_historical_missing_row():
     payload = info(tr_stop_yn="Y")
     assert classify_stock_status(ROW, payload, "2026-10-15", today=date(2026, 10, 16)) is None
     assert classify_stock_status(ROW, payload, "2026-10-16", today=date(2026, 10, 16)) == "trading_halt"
+
+
+def test_theme_recovery_requires_dated_delisting_not_quote_absence_or_halt():
+    assert confirmed_delisting_from_stock_info(info(tr_stop_yn="Y"), "2026-10-16") is None
+    assert confirmed_delisting_from_stock_info({}, "2026-10-16") is None
+    assert confirmed_delisting_from_stock_info(
+        info(scts_mket_lstg_abol_dt="20261017"), "2026-10-16"
+    ) is None
+    assert confirmed_delisting_from_stock_info(
+        info(scts_mket_lstg_abol_dt="20261016"), "2026-10-16"
+    ) == {"std_code": ROW["std_code"], "market": "KOSPI", "delisting_date": "2026-10-16"}
 
 
 @pytest.mark.parametrize("error,recovered", [(MISSING, True), ("network failed", False),

@@ -93,3 +93,12 @@ def test_ecovolt_excluded_after_absorption_merger():
     }])
     assert apply_lifecycle_overrides(universe, as_of=date(2026, 11, 11)).iloc[0]["is_active"]
     assert not apply_lifecycle_overrides(universe, as_of=date(2026, 11, 12)).iloc[0]["is_active"]
+
+
+def test_koramco_the_one_reit_excluded_on_delisting_date():
+    universe = pd.DataFrame([{
+        "symbol": "417310", "std_code": "KR7417310000", "market": "KOSPI",
+        "is_active": True, "is_trading_halt": True,
+    }])
+    assert apply_lifecycle_overrides(universe, as_of=date(2026, 11, 19)).iloc[0]["is_active"]
+    assert not apply_lifecycle_overrides(universe, as_of=date(2026, 11, 20)).iloc[0]["is_active"]

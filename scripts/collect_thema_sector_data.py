@@ -58,6 +58,8 @@ from scripts.collect_sector_data import (
     _telegram_ssl_status_line,
 )
 from scripts.theme_sector_release_lib import THEME_HISTORY_SNAPSHOT_ASSET
+from scripts.prune_delisted_theme_stocks import classification_codes, prune_unlisted
+from src.collect.status_recovery import confirmed_delisting_from_stock_info
 
 
 def _fmt_signed_eok(x: Any) -> str:
@@ -1940,6 +1942,48 @@ def _all_unique_stock_symbols_from_groups(groups: list[dict[str, Any]]) -> list[
     return sorted(out)
 
 
+def _remove_symbols_from_group_blueprints(
+    groups: list[dict[str, Any]], symbols: set[str]
+) -> list[dict[str, Any]]:
+    """Remove verified inactive listings and keep group counts consistent."""
+    if not symbols:
+        return groups
+    kept: list[dict[str, Any]] = []
+    for group in groups:
+        row = dict(group)
+        row["stocks"] = [
+            stock for stock in group.get("stocks", [])
+            if _norm_kis_stock_symbol(stock.get("symbol", "")) not in symbols
+        ]
+        row["member_count"] = len(row["stocks"])
+        if row["stocks"]:
+            kept.append(row)
+    return kept
+
+
+def _confirm_missing_delistings(
+    client: Any, symbols: list[str], target_date: str
+) -> tuple[set[str], list[dict[str, Any]]]:
+    """Check quote misses against dated KIS listing data; never infer from absence."""
+    confirmed: set[str] = set()
+    diagnostics: list[dict[str, Any]] = []
+    for symbol in sorted(set(symbols)):
+        entry: dict[str, Any] = {
+            "symbol": symbol, "target_date": target_date, "outcome": "unresolved"
+        }
+        try:
+            payload = client.get_stock_info(symbol)
+            delisting = confirmed_delisting_from_stock_info(payload, target_date)
+            if delisting:
+                confirmed.add(symbol)
+                entry.update(delisting)
+                entry["outcome"] = "delisted"
+        except Exception as exc:
+            entry["lookup_error"] = str(exc)
+        diagnostics.append(entry)
+    return confirmed, diagnostics
+
+
 def _probe_top_symbols_per_group(
     groups: list[dict[str, Any]],
     live_signal_map: dict[str, dict[str, Any]],
@@ -3275,6 +3319,37 @@ def main() -> None:
             )
             probe_quotes.update(retry_probe_quotes)
             print(f"[probe] after retry ok={len(probe_quotes)}/{probe_minimal_target_n}")
+        missing = sorted(set(probe_syms) - set(probe_quotes))
+        if missing:
+            delisted, lifecycle_diagnostics = _confirm_missing_delistings(
+                client, missing, target_trading_date
+            )
+            diagnostics_dir = Path("data/reports/collection")
+            diagnostics_dir.mkdir(parents=True, exist_ok=True)
+            (diagnostics_dir / "theme-lifecycle-recovery.json").write_text(
+                json.dumps(lifecycle_diagnostics, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            if delisted:
+                print(
+                    f"[probe] verified delisted exclusions={len(delisted)} "
+                    f"codes={sorted(delisted)}"
+                )
+                listed_codes = classification_codes(data) - delisted
+                prune_unlisted(data, listed_codes, as_of=target_trading_date)
+                source_path.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                major_blueprints = _remove_symbols_from_group_blueprints(
+                    major_blueprints, delisted
+                )
+                middle_blueprints = _remove_symbols_from_group_blueprints(
+                    middle_blueprints, delisted
+                )
+                all_groups = major_blueprints + middle_blueprints
+                probe_syms = _all_unique_stock_symbols_from_groups(all_groups)
+                probe_minimal_target_n = len(probe_syms)
         if args.strict_completeness and len(probe_quotes) != probe_minimal_target_n:
             missing = sorted(set(probe_syms) - set(probe_quotes))
             raise RuntimeError(

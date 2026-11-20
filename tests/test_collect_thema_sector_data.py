@@ -19,9 +19,11 @@ from scripts.collect_thema_sector_data import (
     _build_theme_metric_history_rows,
     _build_theme_history_snapshot_rows,
     _combine_theme_history_dirs,
+    _confirm_missing_delistings,
     _build_theme_daily_leader_history_sections,
     _load_theme_history_rows,
     _missing_investor_symbols,
+    _remove_symbols_from_group_blueprints,
     _recent_history_gap_days,
     _render_theme_history_calendar_html,
     _theme_history_local_summary,
@@ -39,6 +41,36 @@ from scripts.collect_thema_sector_data import (
     _validate_classification_data,
     _write_theme_history_snapshot,
 )
+
+
+def test_missing_quote_is_skipped_only_with_effective_delisting() -> None:
+    class Client:
+        def get_stock_info(self, symbol):
+            if symbol == "111111":
+                return {"rt_cd": "0", "output": {
+                    "std_pdno": "KR7111110000",
+                    "scts_mket_lstg_abol_dt": "20261120",
+                }}
+            return {"rt_cd": "0", "output": {
+                "std_pdno": "KR7222220000", "tr_stop_yn": "Y"
+            }}
+
+    confirmed, diagnostics = _confirm_missing_delistings(
+        Client(), ["222222", "111111"], "2026-11-20"
+    )
+    assert confirmed == {"111111"}
+    assert [row["outcome"] for row in diagnostics] == ["delisted", "unresolved"]
+
+
+def test_verified_delisting_is_removed_from_every_group() -> None:
+    groups = [{
+        "display_name": "sample",
+        "member_count": 2,
+        "stocks": [{"symbol": "111111"}, {"symbol": "222222"}],
+    }]
+    result = _remove_symbols_from_group_blueprints(groups, {"111111"})
+    assert result[0]["member_count"] == 1
+    assert result[0]["stocks"] == [{"symbol": "222222"}]
 
 
 def test_market_data_quality_rejects_premarket_zero_activity() -> None:
